@@ -1,4 +1,8 @@
-import { StatefulSkillHarness, toNaturalSpokenKorean } from "../../packages/core/agent-harness.ts";
+import {
+  parseStructuredHarnessOutput,
+  StatefulSkillHarness,
+  toNaturalSpokenKorean,
+} from "../../packages/core/agent-harness.ts";
 import { createKoreanSkillPlugins } from "../../packages/locale-ko-kr/skills.ts";
 import { VisualPedestrianNavigator } from "../../packages/locale-ko-kr/pedestrian-nav.ts";
 import {
@@ -340,6 +344,60 @@ export async function runFullQaVerificationSuite(): Promise<{
       mergedTemporal.door === "3-2",
     failedGates: reg08Check.failedGates,
   });
+  // QA-REG-09: LUM-132/133/134 AUTO Mode Refrigerator & Orange Juice Classification (Never WALKING_SAFETY)
+  const fridgeDoorParsed = parseStructuredHarnessOutput(
+    "[WALKING_SAFETY] 냉장고 문 앞에 서 계시니까 조심해서 이동해 볼까요?",
+  );
+  const orangeJuiceParsed = parseStructuredHarnessOutput(
+    "[WALKING_SAFETY] 델몬트 오렌지주스 1.5리터 병이 보이네요. 냉장고 안에서 꺼내고 계신가 봐요.",
+  );
+  const reg09Check = evaluateSpeechQualityGates(
+    fridgeDoorParsed.draftSpeech,
+    /냉장고 문을 여셨네요.*찾으시는 음료나 반찬통을 가까이 비춰 주시면 이름과 소비기한을 읽어 드릴게요/,
+  );
+  results.push({
+    id: "QA-REG-09",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 LUM-132/133/134] 전체자동(AUTO) 모드에서 냉장고/오렌지주스 노출 시 WALKING_SAFETY 오분류 차단 및 SMART_READER 자동 전환",
+    spokenOutput: `${reg09Check.naturalSpeech} (교정된 모드: ${fridgeDoorParsed.mode}, ${orangeJuiceParsed.mode})`,
+    passed:
+      reg09Check.passed &&
+      fridgeDoorParsed.mode === "SMART_READER" &&
+      orangeJuiceParsed.mode === "SMART_READER",
+    failedGates: reg09Check.failedGates,
+  });
+
+  // QA-REG-10: LUM-135/136/137/138 Conservative Visually Impaired Transit ETA ('포자랩스' >= 40min) & STT Typo Barge-In Search ('그냥 컴포즈 커피 홈즈 폭포' -> 컴포즈커피 홍제폭포점)
+  const pozalabsSearch = await nav.searchDestinationCandidates({
+    query: "목적지 포자랩스로 바꿔줘",
+    originLat: 37.5571,
+    originLng: 127.0371,
+    sortMode: "RECOMMENDED",
+  });
+  const composeTypoSearch = await nav.searchDestinationCandidates({
+    query: "그냥 컴포즈 커피 홈즈 폭포 검색",
+    originLat: 37.5571,
+    originLng: 127.0371,
+    sortMode: "RECOMMENDED",
+  });
+  const pozaFirst = pozalabsSearch.candidatesByRecommended[0];
+  const composeFirst = composeTypoSearch.candidatesByRecommended[0];
+  const reg10Check = evaluateSpeechQualityGates(
+    `${pozalabsSearch.confirmationPromptKo} | ${composeTypoSearch.confirmationPromptKo}`,
+    /포자랩스.*컴포즈커피/,
+  );
+  results.push({
+    id: "QA-REG-10",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 LUM-135~138] 시각장애인 보수적 대중교통 소요시간(포자랩스 약 45~55분) 및 말끊기 STT 오타('그냥 컴포즈 커피 홈즈 폭포' -> 홍제폭포점) 복원",
+    spokenOutput: reg10Check.naturalSpeech,
+    passed:
+      reg10Check.passed &&
+      (pozaFirst?.estimatedTransitMinutes ?? 0) >= 40 &&
+      (composeFirst?.name.includes("컴포즈커피") ?? false),
+    failedGates: reg10Check.failedGates,
+  });
+
   const emartSearch = await nav.searchDestinationCandidates({
     query: "이마트",
     originLat: 37.5006,

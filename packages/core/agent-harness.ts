@@ -75,6 +75,11 @@ export function toNaturalSpokenKorean(rawSpeech: string): string {
     "출입문 옆 손잡이를 안전하게 잡고 계세요.",
   );
 
+  // LUM-132, LUM-133, LUM-134: Never tell user to "dodge the refrigerator door and keep walking" when they opened the fridge to check food/drinks!
+  if (/냉장고\s*문.*?(?:조심|비켜서\s*걸어|이동해\s*볼까요)/.test(text)) {
+    return "냉장고 문을 여셨네요. 찾으시는 음료나 반찬통을 가까이 비춰 주시면 이름과 소비기한을 읽어 드릴게요.";
+  }
+
   // LUM-49 & LUM-50 vs LUM-79 & LUM-89: Dead-end indoor window/desk collision guard ONLY applies in indoor rooms, NEVER inside a subway train!
   const isInsideTrain = /지하철|열차|객차|정거장|승강장|출입문|손잡이/.test(text);
   const hasDeadEndAhead =
@@ -209,6 +214,91 @@ export function isValidObservedSlot(val?: string | null): boolean {
 }
 
 /**
+ * Content-Aware Scene Mode Classifier & Corrector (Fixes LUM-132, LUM-133, LUM-134):
+ * Ensures that even if the VLM defaults to `[WALKING_SAFETY]` in AUTO mode while looking at
+ * a refrigerator, orange juice bottle, medicine, dining plate, induction stove, or desk,
+ * Lumo routes it to the exact domain Micro-Skill instead of treating indoor objects as walking hazards!
+ */
+export function inferOrCorrectSceneModeFromContent(
+  taggedMode: AutoDetectedSceneMode,
+  text: string,
+  slots: Record<string, string>,
+): AutoDetectedSceneMode {
+  if (taggedMode === "NAV_CONTROL" || slots.navAction) return "NAV_CONTROL";
+
+  // If the model explicitly tagged a specialized non-walking mode, respect it
+  if (taggedMode !== "WALKING_SAFETY") {
+    return taggedMode;
+  }
+
+  // When tagged as WALKING_SAFETY (the default sticky mode), check if the visual content is actually a daily/indoor Use Case!
+  if (
+    /1\+1|2\+1|제로\s*슈거|제로슈거|가격표|행사\s*상품/.test(text) ||
+    slots.promo
+  ) {
+    return "GROCERY_SCANNER";
+  }
+  if (
+    /냉장고|주스|오렌지\s*주스|우유|두부|반찬통|유통기한|소비기한|제조일자|약봉지|안약|점안액|영양제|유산균|고지서|택배|송장|리터|ml/i.test(
+      text,
+    ) ||
+    slots.expiryDate ||
+    slots.product
+  ) {
+    return "SMART_READER";
+  }
+  if (/식판|접시|반찬|흰쌀밥|된장국|생선\s*가시/.test(text) || slots.frontLeft) {
+    return "DINING_ASSISTANT";
+  }
+  if (
+    /인덕션|화구|잔열|세탁기|전자레인지|정수기|온수\s*버튼/.test(text) ||
+    slots.residualHeat
+  ) {
+    return "APPLIANCE_SAFETY";
+  }
+  if (/키오스크|엘리베이터.*버튼|손가락에서/.test(text) || slots.dxCm) {
+    return "KIOSK_COACH";
+  }
+  if (/화장실|세면대|빈\s*칸|빈\s*좌석|빈자리/.test(text) || slots.gender) {
+    return "RESTROOM_AND_SEAT";
+  }
+  if (/명함|악수|슬라이드|발표\s*화면/.test(text) || slots.cueType) {
+    return "SOCIAL_MEETING";
+  }
+  if (/택시|장콜|번호판|승차문|뒷좌석/.test(text) || slots.taxiPlate) {
+    return "TAXI_MATCHER";
+  }
+  if (/내리막\s*계단|투명\s*유리문|통유리문|단차/.test(text)) {
+    return "STEP_AND_GLASS_DOOR";
+  }
+  if (/신호등|횡단보도|초록불|녹색\s*신호|적색\s*신호/.test(text)) {
+    return "CROSSWALK_SIGNAL";
+  }
+  if (/버스\s*정류장|정류소/.test(text) || slots.arsId) {
+    return "BUS_STOP";
+  }
+  if (/승강장|스크린도어|빠른\s*환승/.test(text) || slots.door) {
+    return "SUBWAY_PLATFORM";
+  }
+  if (/열차\s*안|객차\s*안|정거장\s*남았/.test(text)) {
+    return "SUBWAY_ON_BOARD";
+  }
+  if (/환승\s*통로|출구\s*방향|개찰구/.test(text)) {
+    return "TRANSFER_CORRIDOR";
+  }
+  if (
+    /에어팟|안경|열쇠|지갑|리모컨|얼룩|셔츠|책상|모니터|서랍장|소파|방문/.test(
+      text,
+    ) ||
+    slots.rememberedItem ||
+    slots.recallItem
+  ) {
+    return "INDOOR_SPACE";
+  }
+  return taggedMode;
+}
+
+/**
  * Parses single-pass VLM output formatted as:
  * `[SUBWAY_PLATFORM | station=교대, door=3-2] 2호선 교대 방면 승강장입니다.`
  */
@@ -227,7 +317,7 @@ export function parseStructuredHarnessOutput(
 
   const slots: Record<string, string> = {};
   if (headerMatch) {
-    const mode = headerMatch[1] as AutoDetectedSceneMode;
+    const rawMode = headerMatch[1] as AutoDetectedSceneMode;
     const rawSlots = headerMatch[2]?.trim();
     if (rawSlots) {
       for (const pair of rawSlots.split(",")) {
@@ -241,25 +331,24 @@ export function parseStructuredHarnessOutput(
       }
     }
     const draftSpeech = headerMatch[3]?.trim() || cleaned;
-    return { mode, slots, draftSpeech };
+    const correctedMode = inferOrCorrectSceneModeFromContent(
+      rawMode,
+      draftSpeech,
+      slots,
+    );
+    return { mode: correctedMode, slots, draftSpeech };
   }
 
-  let inferredMode: AutoDetectedSceneMode = fallbackMode;
-  if (/킥보드|장애물|볼라드|단차|위험/.test(cleaned)) {
-    inferredMode = "WALKING_SAFETY";
-  } else if (/신호등|횡단보도|녹색|적색/.test(cleaned)) {
-    inferredMode = "CROSSWALK_SIGNAL";
-  } else if (/버스|정류장|정류소/.test(cleaned)) {
-    inferredMode = "BUS_STOP";
-  } else if (/승강장|스크린도어|호차|열차/.test(cleaned)) {
-    inferredMode = "SUBWAY_PLATFORM";
-  } else if (/환승|계단|에스컬레이터|표지판/.test(cleaned)) {
-    inferredMode = "TRANSFER_CORRIDOR";
-  } else if (/키오스크|버튼|손가락|결제/.test(cleaned)) {
-    inferredMode = "KIOSK_COACH";
-  } else if (/약봉지|고지서|유통기한|소비기한|택배|메뉴/.test(cleaned)) {
-    inferredMode = "SMART_READER";
-  }
+  const inferredMode = inferOrCorrectSceneModeFromContent(
+    "WALKING_SAFETY",
+    cleaned,
+    slots,
+  );
+  const finalMode =
+    inferredMode === "WALKING_SAFETY" &&
+    !/킥보드|장애물|볼라드|보도블록|점자블록/.test(cleaned)
+      ? fallbackMode
+      : inferredMode;
 
   const doorMatch = cleaned.match(/(\d{1,2}-\d)/);
   if (doorMatch) {
@@ -270,7 +359,7 @@ export function parseStructuredHarnessOutput(
     slots.arsId = arsMatch[1];
   }
 
-  return { mode: inferredMode, slots, draftSpeech: cleaned };
+  return { mode: finalMode, slots, draftSpeech: cleaned };
 }
 
 const STAGE_LABELS: Record<number, string> = {

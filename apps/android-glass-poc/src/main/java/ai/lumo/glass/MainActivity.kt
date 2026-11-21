@@ -1230,15 +1230,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             }
         }
 
-        val navTrigger = Regex("(.+?)(?:으로|로)?\\s*(?:가자|안내해|길찾기|찾아줘|갈래|가고\\s*싶어|가는\\s*길)").find(spoken)
+        val navTrigger = Regex("(.+?)(?:으로|로)?\\s*(?:가자|안내해|안내해줘|길찾기|찾아줘|갈래|가고\\s*싶어|가는\\s*길|바꿔|바꿔줘|바꿀래|변경|변경해줘)").find(spoken)
         if (navTrigger != null) {
-            val placeKeyword = navTrigger.groupValues[1]
-                .replace(Regex("^(루모야?|루모|지금|여기서|근처|나)\\s*"), "")
-                .trim()
+            val placeKeyword = WayfindingNavigator.extractCleanPlaceQuery(navTrigger.groupValues[1])
             if (placeKeyword.length >= 2) {
+                WayfindingNavigator.clearRoute()
                 searchDestinationAndPromptUser(placeKeyword)
                 return
             }
+        }
+
+        // LUM-135, LUM-137, LUM-138: If user interrupted with "그냥 컴포즈 커피 홍제 폭포", "아니 포자랩스", "목적지 포자랩스"
+        if (Regex("^(?:그냥|다시|아니|목적지)\\s+").containsMatchIn(spoken.trim()) && cleanedPlaceCandidate.length >= 2 && !spoken.contains("?")) {
+            WayfindingNavigator.clearRoute()
+            searchDestinationAndPromptUser(cleanedPlaceCandidate)
+            return
         }
 
         // If user just typed a station or place name directly (e.g. "구의역", "이마트")
@@ -1369,6 +1375,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                             return@runOnUiThread
                         }
                         "SEARCH_PLACE" -> if (!reply.navTargetPlace.isNullOrBlank()) {
+                            WayfindingNavigator.clearRoute()
                             searchDestinationAndPromptUser(reply.navTargetPlace)
                             return@runOnUiThread
                         }
@@ -1384,6 +1391,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                             startConfirmedMissionExecution()
                             return@runOnUiThread
                         }
+                    }
+                }
+
+                // Safety net for LUM-135 & LUM-137: If Gemini said "포자랩스로 바로 안내해 드릴게요 / 목적지를 포자랩스로 바로 바꿀게요" without [NAV_CONTROL] header, trigger search immediately!
+                val impliedPlaceMatch = Regex("(?:목적지를\\s*)?([가-힣A-Za-z0-9\\s]{2,15}?)(?:으로|로)\\s*바로\\s*(?:안내해|바꿀게요|바꿔)").find(reply.spokenKorean)
+                if (impliedPlaceMatch != null) {
+                    val impliedPlace = WayfindingNavigator.extractCleanPlaceQuery(impliedPlaceMatch.groupValues[1])
+                    if (impliedPlace.length >= 2) {
+                        WayfindingNavigator.clearRoute()
+                        searchDestinationAndPromptUser(impliedPlace)
+                        return@runOnUiThread
                     }
                 }
 

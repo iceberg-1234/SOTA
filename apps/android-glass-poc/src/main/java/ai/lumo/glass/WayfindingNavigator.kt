@@ -310,12 +310,14 @@ object WayfindingNavigator {
     }
 
     private val CONVERSATIONAL_STOPWORDS = setOf(
-        "아니", "그게", "아니라", "말고", "거기", "여기", "저기", "아까", "말한", "데", "곳",
+        "아니", "아니야", "아뇨", "그냥", "일단", "그러면", "그럼", "대신", "취소",
+        "목적지", "목적지를", "바꿔", "바꿔줘", "바꿀래", "바꿀게요", "변경", "변경해줘",
+        "그게", "아니라", "말고", "거기", "여기", "저기", "아까", "말한", "데", "곳",
         "조금", "더", "가까운", "먼", "다른", "근처", "주변", "인근", "쪽으로", "쪽",
         "지하철", "지하철로", "전철", "전철로", "버스", "버스로", "대중교통", "대중교통으로",
         "도보", "도보로", "걸어서", "노선", "노선도", "경로", "코스", "코스로", "타고", "타는",
         "탄다고", "탈래", "안", "타고싶어", "가고싶어", "가자", "갈래", "가는", "길", "길찾기",
-        "검색", "검색해줘", "찾아줘", "찾아봐", "안내", "안내해줘", "알려줘", "바꿔줘", "다시", "짜줘",
+        "검색", "검색해", "검색해줘", "찾아", "찾아줘", "찾아봐", "안내", "안내해", "안내해줘", "알려줘", "다시", "짜줘",
         "루모", "루모야", "지금", "여기서", "나", "내", "제일", "가장"
     )
 
@@ -347,13 +349,19 @@ object WayfindingNavigator {
         }
     }
     private fun expandBrandQueries(rawQuery: String): List<String> {
-        val q = rawQuery.trim()
-        return when (q) {
-            "이마트" -> listOf("이마트", "이마트에브리데이")
-            "홈플러스" -> listOf("홈플러스", "홈플러스익스프레스")
-            "롯데마트" -> listOf("롯데마트", "롯데슈퍼")
-            else -> listOf(q)
+        val q = extractCleanPlaceQuery(rawQuery)
+        if (q.isEmpty()) return emptyList()
+        if (q == "이마트") return listOf("이마트", "이마트에브리데이")
+        if (q == "홈플러스") return listOf("홈플러스", "홈플러스익스프레스")
+        if (q == "롯데마트") return listOf("롯데마트", "롯데슈퍼")
+        val tokens = tokenizePlaceQuery(q)
+        val queries = linkedSetOf(q)
+        if (tokens.size >= 3) {
+            // LUM-138: Drop penultimate token (often an STT neighborhood mishearing like "홈즈" for "홍제")
+            val withoutPenultimate = (tokens.dropLast(2) + tokens.last()).joinToString(" ")
+            queries.add(withoutPenultimate)
         }
+        return queries.toList()
     }
 
     private fun classifyStoreCategoryAndIntent(name: String, bizName: String, rawQuery: String): Pair<String, Int> {
@@ -482,10 +490,12 @@ object WayfindingNavigator {
                                 p.optString("roadName").ifBlank { p.optString("detailAddrName") }
                             ).filter { it.isNotBlank() }.joinToString(" ").trim()
                             val spokenWithAddr = if (areaRoadPrefix.isNotBlank()) "$areaRoadPrefix 근처 $name" else name
-                            val transitMin = if (dist <= 350) {
-                                max(2, (dist / 65.0).roundToInt())
+                            val transitMin = if (dist <= 400) {
+                                max(4, (dist / 52.0).roundToInt())
                             } else {
-                                max(6, (7.0 + (dist / 1000.0) * 2.2).roundToInt())
+                                val km = dist / 1000.0
+                                val transferBuf = if (dist >= 4500) 7 else 0
+                                max(12, (15.0 + km * 3.6 + transferBuf).roundToInt())
                             }
 
                             val isDup = rawList.any {

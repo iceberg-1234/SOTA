@@ -92,7 +92,12 @@ object NativeLumoAiClient {
             .removeSuffix(",")
             .trim()
 
-        // 3. LUM-49 & LUM-50 vs LUM-79 & LUM-89: Never trigger indoor window dead-end warning when inside a subway train!
+        // 3. LUM-132, LUM-133, LUM-134: Never tell user to "dodge the refrigerator door and keep walking" when they opened the fridge to check food/drinks!
+        if (Regex("냉장고\\s*문.*?(?:조심|비켜서\\s*걸어|이동해\\s*볼까요)").containsMatchIn(cleaned)) {
+            return "냉장고 문을 여셨네요. 찾으시는 음료나 반찬통을 가까이 비춰 주시면 이름과 소비기한을 읽어 드릴게요."
+        }
+
+        // 4. LUM-49 & LUM-50 vs LUM-79 & LUM-89: Never trigger indoor window dead-end warning when inside a subway train!
         val isInsideTrain = Regex("지하철|열차|객차|정거장|승강장|출입문|손잡이").containsMatchIn(cleaned)
         if (isInsideTrain && Regex("(바로\\s*앞은\\s*(?:지하철\\s*)?창문이라\\s*막혀|창문에서\\s*몸을\\s*(?:살짝\\s*)?돌려)").containsMatchIn(cleaned)) {
             val subProg = WayfindingNavigator.computeLiveSubwayProgressForPrompt()
@@ -468,6 +473,7 @@ object NativeLumoAiClient {
         sb.append("3. [Movement-Relative & Tactile Only]: Never use clock-face jargon ('12시 방향') or color-only path instructions ('밝은 색 보도'). Use movement-relative Korean ('지금 걸어가시는 방향 그대로', '오른쪽으로 살짝') and tactile cues (점자블록, 보도턱, 난간) with step counts.\n")
         sb.append("4. [Elevator Exit Floor Priority]: On elevator panels during an outing, check if the 1st/Lobby floor button is lit BEFORE open/close buttons.\n")
         sb.append("5. [Zero Hallucination & UnreadableReason]: Never hallucinate 'door opened', 'boarded train', or 'transfer sign visible' on static frames. If text/signage is unreadable, emit `unreadableReason=TOO_FAR|TOO_CLOSE_BLUR|OCCLUDED_BY_HAND|WRONG_SIDE|TILT_UP|GLARE`. Distinguish `dateType=EXPIRY` (소비기한) from `dateType=MANUFACTURED` (제조일자).\n")
+        sb.append("6. [CRITICAL SCENE CLASSIFICATION IN AUTO MODE (LUM-132~134)]: Do NOT default to `[WALKING_SAFETY]` for indoor or household scenes! When the camera shows a refrigerator, beverage bottle (e.g. orange juice, milk), side-dish container, medicine pouch, or bill, ALWAYS select `[SMART_READER]` or `[GROCERY_SCANNER]` and read the product/contents/expiration date — NEVER tell the user to 'dodge the refrigerator door and walk past it'!\n")
 
         val historyLines = getRecentConversationLines()
         if (historyLines.isNotEmpty()) {
@@ -490,13 +496,19 @@ object NativeLumoAiClient {
         }
         sb.append("\n📌 [On-Device Visual Memory (UC-03)]: ${getVisualMemorySummaryForPrompt()}\n")
         sb.append("- When personal items (에어팟, 안경, 열쇠, 지갑, 리모컨, 약봉지) are visible, emit `[INDOOR_SPACE | rememberedItem=..., itemLocation=...]`.\n")
-        sb.append("- When food dates are visible, emit `[SMART_READER | product=..., expiryDate=YYYY-MM-DD, dateType=EXPIRY|MANUFACTURED]`.\n")
+        sb.append("- When food/drinks/refrigerator items are visible, emit `[SMART_READER | product=..., expiryDate=YYYY-MM-DD, dateType=EXPIRY|MANUFACTURED]`.\n")
         sb.append("- When flat induction residual heat ('H') is visible, emit `[APPLIANCE_SAFETY | appliance=인덕션, residualHeat=true]`.\n")
 
-        sb.append("\n[Active Candidate Micro-Skills (Context-Gated <= 4)]:\n")
+        sb.append("\n[Active Candidate Micro-Skills (Detailed Rules)]:\n")
         for ((id, sk) in SKILLS) {
             if (id in activeIds || id == "SUBWAY_ON_BOARD") {
                 sb.append("• [$id] (${sk.labelKo}): ${sk.triggerDescriptionKo}\n  - Rule: ${sk.extractionRulesKo}\n")
+            }
+        }
+        sb.append("\n[Global Scene Switch Directory — Immediately switch to any of these [MODE_ID]s when visible!]:\n")
+        for ((id, sk) in SKILLS) {
+            if (id !in activeIds && id != "SUBWAY_ON_BOARD" && id != "NAV_CONTROL") {
+                sb.append("• [$id] (${sk.labelKo}): ${sk.triggerDescriptionKo}\n")
             }
         }
         if (!previousSpeech.isNullOrBlank() && userQuery.isBlank()) {
@@ -529,7 +541,7 @@ object NativeLumoAiClient {
         val match = headerRegex.find(cleaned)
         val rawExtractedSlots = mutableMapOf<String, String>()
 
-        val modeId = if (match != null) {
+        val rawModeId = if (match != null) {
             val rawSlots = match.groupValues[2].trim()
             if (rawSlots.isNotEmpty()) {
                 for (pair in rawSlots.split(",")) {
@@ -541,24 +553,39 @@ object NativeLumoAiClient {
             }
             match.groupValues[1]
         } else {
-            when {
-                cleaned.contains("킥보드") || cleaned.contains("장애물") || cleaned.contains("위험") -> "WALKING_SAFETY"
-                cleaned.contains("신호등") || cleaned.contains("횡단보도") -> "CROSSWALK_SIGNAL"
-                cleaned.contains("버스") || cleaned.contains("정류장") -> "BUS_STOP"
-                cleaned.contains("승강장") || cleaned.contains("스크린도어") -> "SUBWAY_PLATFORM"
-                cleaned.contains("환승") || cleaned.contains("계단") -> "TRANSFER_CORRIDOR"
-                cleaned.contains("키오스크") || cleaned.contains("버튼") -> "KIOSK_COACH"
-                cleaned.contains("약봉지") || cleaned.contains("고지서") || cleaned.contains("유통기한") -> "SMART_READER"
-                else -> stickyModeTag
-            }
+            "WALKING_SAFETY"
         }
 
         val slots = mergeAndCacheTemporalSlots(rawExtractedSlots)
+        val bodyText = match?.groupValues?.get(3)?.trim()?.takeIf { it.isNotEmpty() } ?: cleaned
+
+        // Layer 2 Content-Aware Mode Corrector (Fixes LUM-132, LUM-133, LUM-134):
+        // If VLM defaulted to WALKING_SAFETY while describing a refrigerator, orange juice, food, desk, appliance, or restroom, route to the exact Micro-Skill!
+        val modeId = if (rawModeId == "WALKING_SAFETY") {
+            when {
+                Regex("1\\+1|2\\+1|제로\\s*슈거|제로슈거|가격표|행사\\s*상품").containsMatchIn(bodyText) || slots.containsKey("promo") -> "GROCERY_SCANNER"
+                Regex("냉장고|주스|오렌지|우유|두부|반찬통|유통기한|소비기한|제조일자|약봉지|안약|점안액|영양제|유산균|고지서|택배|송장|리터|ml", RegexOption.IGNORE_CASE).containsMatchIn(bodyText) || slots.containsKey("expiryDate") || slots.containsKey("product") -> "SMART_READER"
+                Regex("식판|접시|반찬|흰쌀밥|된장국|생선\\s*가시").containsMatchIn(bodyText) || slots.containsKey("frontLeft") -> "DINING_ASSISTANT"
+                Regex("인덕션|화구|잔열|세탁기|전자레인지|정수기|온수").containsMatchIn(bodyText) || slots.containsKey("residualHeat") -> "APPLIANCE_SAFETY"
+                Regex("키오스크|엘리베이터.*버튼|손가락에서").containsMatchIn(bodyText) || slots.containsKey("dxCm") -> "KIOSK_COACH"
+                Regex("화장실|세면대|빈\\s*칸|빈\\s*좌석|빈자리").containsMatchIn(bodyText) || slots.containsKey("gender") -> "RESTROOM_AND_SEAT"
+                Regex("명함|악수|슬라이드|발표").containsMatchIn(bodyText) || slots.containsKey("cueType") -> "SOCIAL_MEETING"
+                Regex("택시|장콜|번호판|승차문|뒷좌석").containsMatchIn(bodyText) || slots.containsKey("taxiPlate") -> "TAXI_MATCHER"
+                Regex("내리막\\s*계단|투명\\s*유리문|통유리문|단차").containsMatchIn(bodyText) -> "STEP_AND_GLASS_DOOR"
+                Regex("신호등|횡단보도|초록불|녹색\\s*신호|적색\\s*신호").containsMatchIn(bodyText) -> "CROSSWALK_SIGNAL"
+                Regex("버스|정류장|정류소").containsMatchIn(bodyText) -> "BUS_STOP"
+                Regex("승강장|스크린도어|빠른\\s*환승").containsMatchIn(bodyText) -> "SUBWAY_PLATFORM"
+                Regex("열차\\s*안|객차\\s*안|정거장\\s*남았").containsMatchIn(bodyText) -> "SUBWAY_ON_BOARD"
+                Regex("환승\\s*통로|출구\\s*방향|개찰구").containsMatchIn(bodyText) -> "TRANSFER_CORRIDOR"
+                Regex("에어팟|안경|열쇠|지갑|리모컨|얼룩|셔츠|책상|모니터|서랍장|소파|방문").containsMatchIn(bodyText) || slots.containsKey("rememberedItem") -> "INDOOR_SPACE"
+                else -> "WALKING_SAFETY"
+            }
+        } else {
+            rawModeId
+        }
 
         var draftSpeech = WayfindingNavigator.guardSubwayRideSpeech(
-            cleanMovementRelativeDirection(
-                match?.groupValues?.get(3)?.trim()?.takeIf { it.isNotEmpty() } ?: cleaned
-            )
+            cleanMovementRelativeDirection(bodyText)
         )
         val skill = SKILLS[modeId] ?: SKILLS.getValue("INDOOR_SPACE")
         stickyModeTag = skill.id

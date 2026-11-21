@@ -182,7 +182,7 @@ export function coachHeadingAlignmentKo(
 }
 
 export function expandKoreanPoiQuery(rawQuery: string): string[] {
-  const q = rawQuery.trim();
+  const q = VisualPedestrianNavigator.extractCleanPlaceQuery(rawQuery);
   if (!q) return [];
   if (q === "이마트") {
     return ["이마트", "이마트에브리데이"];
@@ -193,7 +193,17 @@ export function expandKoreanPoiQuery(rawQuery: string): string[] {
   if (q === "롯데마트") {
     return ["롯데마트", "롯데슈퍼"];
   }
-  return [q];
+  const tokens = VisualPedestrianNavigator.tokenizePlaceQuery(q);
+  const queries = new Set<string>([q]);
+  if (tokens.length >= 3) {
+    // LUM-138: Drop the second-to-last token (often an STT neighborhood mishearing like "홈즈" for "홍제")
+    const withoutPenultimate = [
+      ...tokens.slice(0, -2),
+      tokens[tokens.length - 1],
+    ].join(" ");
+    queries.add(withoutPenultimate);
+  }
+  return Array.from(queries);
 }
 
 export function classifyKoreanStoreCategory(
@@ -258,12 +268,18 @@ export function classifyKoreanStoreCategory(
   };
 }
 
+/**
+ * Conservative Door-to-Door Public Transit ETA for Visually Impaired Travelers (Fixes LUM-136):
+ * Accounts for cane walking speed (0.85m/s) to/from stations, elevator/stair/screen-door navigation (+15 min base),
+ * road/rail tortuosity (~3.6 min per straight-line km), and cross-river/transfer corridor buffer (+7 min when >= 4.5km).
+ */
 export function estimatePublicTransitMinutes(distanceMeters: number): number {
-  if (distanceMeters <= 500) {
-    return Math.max(2, Math.round(distanceMeters / 65));
+  if (distanceMeters <= 400) {
+    return Math.max(4, Math.round(distanceMeters / 52));
   }
-  // Door-to-door transit time in Seoul: ~7 min station access/wait + ~2.2 min per km on subway/bus
-  return Math.max(6, Math.round(7 + (distanceMeters / 1000) * 2.2));
+  const km = distanceMeters / 1000;
+  const transferBuffer = distanceMeters >= 4500 ? 7 : 0;
+  return Math.max(12, Math.round(15 + km * 3.6 + transferBuffer));
 }
 
 export function scoreAndRankPoiCandidates(
@@ -435,12 +451,14 @@ export class VisualPedestrianNavigator {
   }
 
   private static readonly CONVERSATIONAL_STOPWORDS = new Set([
-    "아니", "그게", "아니라", "말고", "거기", "여기", "저기", "아까", "말한", "데", "곳",
+    "아니", "아니야", "아뇨", "그냥", "일단", "그러면", "그럼", "대신", "취소",
+    "목적지", "목적지를", "바꿔", "바꿔줘", "바꿀래", "바꿀게요", "변경", "변경해줘",
+    "그게", "아니라", "말고", "거기", "여기", "저기", "아까", "말한", "데", "곳",
     "조금", "더", "가까운", "먼", "다른", "근처", "주변", "인근", "쪽으로", "쪽",
     "지하철", "지하철로", "전철", "전철로", "버스", "버스로", "대중교통", "대중교통으로",
     "도보", "도보로", "걸어서", "노선", "노선도", "경로", "코스", "코스로", "타고", "타는",
     "탄다고", "탈래", "안", "타고싶어", "가고싶어", "가자", "갈래", "가는", "길", "길찾기",
-    "검색", "검색해줘", "찾아줘", "찾아봐", "안내", "안내해줘", "알려줘", "바꿔줘", "다시", "짜줘",
+    "검색", "검색해", "검색해줘", "찾아", "찾아줘", "찾아봐", "안내", "안내해", "안내해줘", "알려줘", "다시", "짜줘",
     "루모", "루모야", "지금", "여기서", "나", "내", "제일", "가장",
   ]);
 
