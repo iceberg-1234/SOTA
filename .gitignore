@@ -11,3 +11,5 @@ build/
 !.env.example
 .devin/*.local.json
 feedback-logs/
+ONE_PAGER.md
+PRD.md
