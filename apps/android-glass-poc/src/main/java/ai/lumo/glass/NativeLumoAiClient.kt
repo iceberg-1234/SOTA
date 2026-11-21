@@ -275,6 +275,48 @@ object NativeLumoAiClient {
         "열쇠" to "현관 신발장 위 트레이"
     )
 
+    private val temporalSlotCache = mutableMapOf<String, Pair<String, Long>>()
+    private const val SLOT_TTL_MS = 15_000L
+
+    @Synchronized
+    fun mergeAndCacheTemporalSlots(newSlots: Map<String, String>): Map<String, String> {
+        val now = System.currentTimeMillis()
+        val iter = temporalSlotCache.iterator()
+        while (iter.hasNext()) {
+            val entry = iter.next()
+            if (now - entry.value.second > SLOT_TTL_MS) {
+                iter.remove()
+            }
+        }
+        for ((k, v) in newSlots) {
+            if (isValidSlot(v)) {
+                temporalSlotCache[k] = v to now
+            }
+        }
+        val merged = mutableMapOf<String, String>()
+        for ((k, pair) in temporalSlotCache) {
+            merged[k] = pair.first
+        }
+        merged.putAll(newSlots)
+        return merged
+    }
+
+    fun coachPhysicalViewFindingKo(reason: String?, domain: String = "SIGN"): String {
+        return when (reason?.uppercase()) {
+            "TOO_CLOSE_BLUR" -> "카메라와 너무 가까워 초점이 흐려졌어요. 물건을 얼굴에서 한 뼘 정도만 뒤로 떼어 보실래요?"
+            "OCCLUDED_BY_HAND" -> "손가락이 글자 부분을 가리고 있어요. 손가락을 가장자리 쪽으로 살짝만 옮겨 보실래요?"
+            "WRONG_SIDE" -> "지금 비추신 면에는 찾는 정보가 없어요. 용기나 봉투를 천천히 반 바퀴 돌려 보실래요?"
+            "TILT_UP" -> "표지판이 위쪽에 있어서 화면에 다 안 잡혔어요. 고개를 살짝만 위로 들어 비춰 보실래요?"
+            "TILT_DOWN" -> "대상이 아래쪽에 있어요. 고개를 살짝 아래로 숙여 비춰 보실래요?"
+            "GLARE" -> "빛 반사 때문에 글씨가 하얗게 번져 보여요. 각도를 옆으로 살짝만 틀어 보실래요?"
+            else -> if (domain == "HANDHELD_ITEM") {
+                "글씨가 작아 아직 선명하지 않아요. 물건을 가슴 높이에서 조금만 더 가까이 비춰 보실래요?"
+            } else {
+                "승강장이나 정류장 표지판 글씨가 아직 잘 안 보여요. 정면으로 서너 걸음만 더 다가가서 위쪽 표지판을 비춰 보실래요?"
+            }
+        }
+    }
+
     @Synchronized
     fun rememberObjectLocation(itemName: String, locationKo: String) {
         if (itemName.isNotBlank() && locationKo.isNotBlank()) {
@@ -417,20 +459,19 @@ object NativeLumoAiClient {
     private fun assembleLayer1Prompt(userQuery: String, previousSpeech: String?): String {
         val activeIds = getActiveCandidateSkillIds(userQuery)
         val sb = StringBuilder()
-        sb.append("당신은 시각장애인 사용자의 옆에서 함께 걸으며 대화하는 다정한 AI 길동무 '루모'입니다 (Gemini Live / Pickle 스타일).\n")
-        sb.append("[Layer 1 상태 유지 라우터 | 직전 모드: $stickyModeTag]\n")
-        sb.append("맨 앞에만 시스템용 `[모드ID | 키=값]` 헤더를 적고, 그 뒤에 이어지는 말은 **기계적인 스크린 리더기가 아니라 옆에 있는 친구가 말하듯 자연스러운 구어체(~해요, ~있어요, ~볼까요?)로 짧게 1~2문장(70자 이내)**만 작성하세요.\n")
-        sb.append("⚠️ 필수 대화형 음성 UX 규칙:\n")
-        sb.append("1. [기호·화살표·괄호 절대 금지]: 본문에는 `→`, `[`, `]`, `(`, `)`, `·`, `/` 같은 기호나 '1/4단계' 같은 딱딱한 보고서 말머리를 절대 쓰지 마세요.\n")
-        sb.append("2. [창문/책상 충돌 방지]: 실내에서 정면에 책상, 창문, 블라인드, 벽이 보이면 절대 앞으로 걸어 나가라고 하지 마세요! '어이쿠, 바로 앞은 창문(또는 책상)이라 막혀 있어요. 뒤로 돌아서서 방문 쪽을 먼저 비춰 보실래요?'라고 말하세요.\n")
-        sb.append("3. [색상 지시 및 시계 방향 금지]: '12시 방향'이나 '밝은 색 보도' 대신 '지금 걸어가시는 방향 그대로 다섯 걸음만 가볼까요?', '오른쪽으로 살짝 돌아서세요'처럼 자연스럽게 말하세요.\n")
-        sb.append("4. [엘리베이터 층수 확인]: 외출 미션 중 엘리베이터 버튼이 보이면 닫힘 버튼보다 먼저 1층 버튼에 불이 켜져 있는지 봐주고, 안 눌려 있으면 '일단 1층 버튼부터 눌러볼까요? 지금 손에서 조금만 아래로 내려보세요'처럼 코칭하세요.\n")
-
-        sb.append("5. [지하철 탑승 및 정지 화면 환각 금지 (LUM-74~109)]: 카메라 화면이 직전과 비슷하다고 해서 상상으로 '문이 열렸다', '열차에 탔다', '승강장으로 나왔다', '환승통로 표지판이 보인다'고 지어내지 마세요! 지하철 객차 안에서는 `[SUBWAY_ON_BOARD]`를 선택하고, 빈자리를 찾으라거나 유리창이 막혀 있으니 돌아서라고 하지 말고 출입문 옆 손잡이를 잡게 한 뒤 [현재 역, 목적지까지 남은 정거장 수, 내릴 문 방향(오른쪽/왼쪽)]을 안내하세요.\n")
+        sb.append("[Layer 1: Context-Gated Micro-Skill Router | Sticky Mode: $stickyModeTag | Target Output Locale: ko-KR]\n")
+        sb.append("You are 'Lumo', a warm, conversational AI smart-glass companion walking alongside a visually impaired user in Korea (Gemini Live / Pickle style).\n")
+        sb.append("Output a single-pass header `[MODE_ID | key=value]` first, followed by 1-2 short, natural conversational Korean sentences (~해요, ~있어요, ~볼까요?, under 75 chars).\n")
+        sb.append("⚠️ CRITICAL ACCESSIBILITY & CONVERSATIONAL UX RULES (English-Core):\n")
+        sb.append("1. [NO Screen-Reader Symbols]: Never output `→`, `[`, `]`, `(`, `)`, `·`, `/` or stage prefixes in the spoken Korean body.\n")
+        sb.append("2. [Indoor Dead-End vs Subway Train Window]: In an indoor room, if a desk/window/blind/wall blocks the front, NEVER tell the user to walk straight forward ('어이쿠, 바로 앞은 창문이나 책상이라 막혀 있어요. 뒤로 돌아서서 방문 쪽을 먼저 비춰 보실래요?'). Inside a subway train (`SUBWAY_ON_BOARD`), standing by the train door window holding the handrail is safe and normal.\n")
+        sb.append("3. [Movement-Relative & Tactile Only]: Never use clock-face jargon ('12시 방향') or color-only path instructions ('밝은 색 보도'). Use movement-relative Korean ('지금 걸어가시는 방향 그대로', '오른쪽으로 살짝') and tactile cues (점자블록, 보도턱, 난간) with step counts.\n")
+        sb.append("4. [Elevator Exit Floor Priority]: On elevator panels during an outing, check if the 1st/Lobby floor button is lit BEFORE open/close buttons.\n")
+        sb.append("5. [Zero Hallucination & UnreadableReason]: Never hallucinate 'door opened', 'boarded train', or 'transfer sign visible' on static frames. If text/signage is unreadable, emit `unreadableReason=TOO_FAR|TOO_CLOSE_BLUR|OCCLUDED_BY_HAND|WRONG_SIDE|TILT_UP|GLARE`. Distinguish `dateType=EXPIRY` (소비기한) from `dateType=MANUFACTURED` (제조일자).\n")
 
         val historyLines = getRecentConversationLines()
         if (historyLines.isNotEmpty()) {
-            sb.append("\n💬 [최근 사용자와의 대화 맥락]:\n")
+            sb.append("\n💬 [Recent Conversation Context]:\n")
             for (line in historyLines) {
                 sb.append("$line\n")
             }
@@ -439,43 +480,42 @@ object NativeLumoAiClient {
         if (activeMissionGoal.isNotEmpty()) {
             val stageStr = STAGE_DESC[missionStageIndex] ?: "진행 중"
             val liveNavCtx = WayfindingNavigator.buildLiveNavContextForPrompt()
-            sb.append("\n🎯 [현재 함께 가는 목적지]: \"$activeMissionGoal\" ($stageStr)\n")
+            sb.append("\n🎯 [Active Navigation Mission]: \"$activeMissionGoal\" ($stageStr)\n")
             if (liveNavCtx.isNotEmpty()) {
-                sb.append("- [실시간 위치/정거장/출구/문방향 데이터]: $liveNavCtx\n")
+                sb.append("- [Live GPS/Station/Exit/Door-Side Data]: $liveNavCtx\n")
             }
         }
         if (expectedTaxiPlate.isNotBlank()) {
-            sb.append("\n🚕 [호출 택시/장콜 대기 번호]: \"$expectedTaxiPlate\" — 진입 차량의 번호판, 색상, 차종과 뒷좌석 문 손잡이 위치를 대조해 주세요(UC-15).\n")
+            sb.append("\n🚕 [Expected Called Taxi Plate (UC-15)]: \"$expectedTaxiPlate\" — Match incoming vehicle license plate, color, model, and rear-right door handle steps.\n")
         }
-        sb.append("\n📌 [온디바이스 시각 메모리 (기억해 둔 집안 물건 위치 - UC-03)]: ${getVisualMemorySummaryForPrompt()}\n")
-        sb.append("- 카메라에 에어팟, 안경, 열쇠, 지갑, 리모컨, 약봉지 등 생활 물건이 보이면 `[INDOOR_SPACE | rememberedItem=물건명, itemLocation=구체적위치]` 슬롯을 함께 적고, 사용자가 물건 위치를 물어보면 기억해 둔 위치를 알려주세요.\n")
-        sb.append("- 식품 유통기한/소비기한이 보이면 `[SMART_READER | product=제품명, expiryDate=YYYY-MM-DD]` 슬롯을 적으세요.\n")
-        sb.append("- 평면 인덕션 잔열(H) 표시가 보이면 `[KIOSK_COACH | appliance=인덕션, residualHeat=true]`를 적어 화상을 예방하세요.\n")
+        sb.append("\n📌 [On-Device Visual Memory (UC-03)]: ${getVisualMemorySummaryForPrompt()}\n")
+        sb.append("- When personal items (에어팟, 안경, 열쇠, 지갑, 리모컨, 약봉지) are visible, emit `[INDOOR_SPACE | rememberedItem=..., itemLocation=...]`.\n")
+        sb.append("- When food dates are visible, emit `[SMART_READER | product=..., expiryDate=YYYY-MM-DD, dateType=EXPIRY|MANUFACTURED]`.\n")
+        sb.append("- When flat induction residual heat ('H') is visible, emit `[APPLIANCE_SAFETY | appliance=인덕션, residualHeat=true]`.\n")
 
-        sb.append("\n[우선 활성 스킬 규칙]:\n")
+        sb.append("\n[Active Candidate Micro-Skills (Context-Gated <= 4)]:\n")
         for ((id, sk) in SKILLS) {
             if (id in activeIds || id == "SUBWAY_ON_BOARD") {
-                sb.append("• [$id] (${sk.labelKo}): ${sk.triggerDescriptionKo}\n  - 규칙: ${sk.extractionRulesKo}\n")
+                sb.append("• [$id] (${sk.labelKo}): ${sk.triggerDescriptionKo}\n  - Rule: ${sk.extractionRulesKo}\n")
             }
         }
         if (!previousSpeech.isNullOrBlank() && userQuery.isBlank()) {
-            sb.append("\n(직전 루모 발화: \"$previousSpeech\" — 만약 카메라 화면 상황이 직전과 동일하면 억지로 다른 상황(하차/문열림/환승통로)을 지어내지 말고, 현재 위치와 목적지까지 남은 정거장·내릴 문 방향 또는 대기 안내를 일관되게 말하세요.)\n")
+            sb.append("\n(Previous Lumo speech: \"$previousSpeech\" — If the camera scene is unchanged, do NOT invent a state jump; keep consistent station/waiting guidance.)\n")
         }
         if (userQuery.isNotBlank()) {
             val pendingCands = WayfindingNavigator.lastSearchResult?.candidatesRecommended?.take(4)?.joinToString(", ") { "${it.index}번:${it.name}" } ?: "없음"
             val curDest = WayfindingNavigator.activeRoute?.destination?.name ?: "미정"
-            sb.append("\n🧭 [내비게이션 도구 호출 규칙 (NAV_CONTROL)]:\n")
-            sb.append("- 현재 목적지: $curDest | 대기 중인 검색 후보: [$pendingCands]\n")
-            sb.append("- 만약 사용자의 말이 이동수단 변경(예: 지하철/전철로 가고 싶다, 버스 싫다, 걸어가겠다), 새 장소 검색(예: ~찾아줘, ~가자), 후보 선택, 출발 확정이라면 카메라 묘사 대신 반드시 아래 헤더를 맨 앞에 출력하세요:\n")
-            sb.append("  • 지하철/전철 경로로 전환 요청 시: `[NAV_CONTROL | navAction=SWITCH_SUBWAY]`\n")
-            sb.append("  • 버스 경로로 전환 요청 시: `[NAV_CONTROL | navAction=SWITCH_BUS]`\n")
-            sb.append("  • 도보/걸어서 경로로 전환 요청 시: `[NAV_CONTROL | navAction=SWITCH_WALK]`\n")
-            sb.append("  • 새로운 장소 검색 요청 시(실제 장소명 명사만 추출): `[NAV_CONTROL | navAction=SEARCH_PLACE, place=순수장소명]`\n")
-            sb.append("  • 대기 후보 중 번호/이름 선택 시: `[NAV_CONTROL | navAction=SELECT_CANDIDATE, index=번호]`\n")
-            sb.append("  • 계획에 동의해 출발 확정 시: `[NAV_CONTROL | navAction=CONFIRM_START]`\n")
-            sb.append("\n🎤 사용자가 방금 한 말: \"$userQuery\" -> 위 도구 규칙 또는 카메라 화면을 참고해 친구처럼 자연스럽게 답하세요.")
+            sb.append("\n🧭 [Navigation Control Tool Rules (NAV_CONTROL)]:\n")
+            sb.append("- Current Destination: $curDest | Pending Candidates: [$pendingCands]\n")
+            sb.append("  • Switch to Subway route: `[NAV_CONTROL | navAction=SWITCH_SUBWAY]`\n")
+            sb.append("  • Switch to Bus route: `[NAV_CONTROL | navAction=SWITCH_BUS]`\n")
+            sb.append("  • Switch to Walk route: `[NAV_CONTROL | navAction=SWITCH_WALK]`\n")
+            sb.append("  • Search new place (extract pure place noun only): `[NAV_CONTROL | navAction=SEARCH_PLACE, place=...]`\n")
+            sb.append("  • Select candidate index: `[NAV_CONTROL | navAction=SELECT_CANDIDATE, index=1]`\n")
+            sb.append("  • Confirm start route: `[NAV_CONTROL | navAction=CONFIRM_START]`\n")
+            sb.append("\n🎤 User Utterance: \"$userQuery\" -> Reply in warm, natural conversational Korean (ko-KR).")
         } else {
-            sb.append("\n현재 카메라 화면을 보고 가장 알맞은 [모드ID]와 자연스러운 구어체 안내 1~2문장을 출력하세요.")
+            sb.append("\nAnalyze the current camera frame and output `[MODE_ID | key=value]` followed by 1-2 conversational Korean sentences.")
         }
         return sb.toString()
     }
@@ -487,7 +527,7 @@ object NativeLumoAiClient {
             RegexOption.DOT_MATCHES_ALL
         )
         val match = headerRegex.find(cleaned)
-        val slots = mutableMapOf<String, String>()
+        val rawExtractedSlots = mutableMapOf<String, String>()
 
         val modeId = if (match != null) {
             val rawSlots = match.groupValues[2].trim()
@@ -495,7 +535,7 @@ object NativeLumoAiClient {
                 for (pair in rawSlots.split(",")) {
                     val kv = pair.split("=", limit = 2)
                     if (kv.size == 2 && isValidSlot(kv[1])) {
-                        slots[kv[0].trim()] = kv[1].trim()
+                        rawExtractedSlots[kv[0].trim()] = kv[1].trim()
                     }
                 }
             }
@@ -513,6 +553,8 @@ object NativeLumoAiClient {
             }
         }
 
+        val slots = mergeAndCacheTemporalSlots(rawExtractedSlots)
+
         var draftSpeech = WayfindingNavigator.guardSubwayRideSpeech(
             cleanMovementRelativeDirection(
                 match?.groupValues?.get(3)?.trim()?.takeIf { it.isNotEmpty() } ?: cleaned
@@ -522,7 +564,7 @@ object NativeLumoAiClient {
         stickyModeTag = skill.id
         advanceMissionStage(skill.id)
 
-        // Layer 2 Guard & Enrichment for SUBWAY_PLATFORM (Fixes LUM-17 & LUM-19)
+        // Layer 2 Guard & Enrichment for SUBWAY_PLATFORM (Zero-Hardcoding + Active View-Finding)
         if (skill.id == "SUBWAY_PLATFORM") {
             val door = slots["door"] ?: Regex("(\\d{1,2}-\\d)").find(draftSpeech)?.groupValues?.get(1)
             val nextStn = slots["nextStation"]?.takeIf { isValidSlot(it) }
@@ -530,56 +572,69 @@ object NativeLumoAiClient {
 
             if (door != null && nextStn != null) {
                 val arrivalMin = fetchSeoulSubwayLive(nextStn, nextStn)
-                val enriched = KoreanTransitDoorCalculator.calculateTransferGuidance(
-                    lineName = line ?: "지하철",
-                    intendedDirectionStation = nextStn,
-                    observedNextStation = nextStn,
-                    observedDoorRaw = door,
-                    targetDoorRaw = "5-3",
-                    transferStationName = "${nextStn.removeSuffix("역")}역",
-                    transferTargetLine = slots["transferLine"]?.takeIf { isValidSlot(it) } ?: "환승 노선",
-                    higherCarIsRight = true,
-                    arrivalMinutes = arrivalMin
-                )
-                return Triple(skill, cleanMovementRelativeDirection(enriched), slots)
+                val targetDoor = slots["targetDoor"]?.takeIf { isValidSlot(it) }
+                if (targetDoor != null) {
+                    val enriched = KoreanTransitDoorCalculator.calculateTransferGuidance(
+                        lineName = line ?: "지하철",
+                        intendedDirectionStation = nextStn,
+                        observedNextStation = nextStn,
+                        observedDoorRaw = door,
+                        targetDoorRaw = targetDoor,
+                        transferStationName = "${nextStn.removeSuffix("역")}역",
+                        transferTargetLine = slots["transferLine"]?.takeIf { isValidSlot(it) } ?: "환승 노선",
+                        higherCarIsRight = true,
+                        arrivalMinutes = arrivalMin
+                    )
+                    return Triple(skill, cleanMovementRelativeDirection(enriched), slots)
+                }
+                val verified = "${line ?: "지하철"} $nextStn 방면 승강장 맞아요. 현재 $door 번 스크린도어 앞이고, 다음 열차는 약 ${arrivalMin ?: 3}분 뒤 도착해요."
+                return Triple(skill, verified, slots)
             }
 
-            if (draftSpeech.contains("None") || draftSpeech.contains("알수없음") || draftSpeech.contains("알 수 없음")) {
-                draftSpeech = "승강장 표지판 글씨가 아직 잘 안 보여요. 정면 스크린도어 쪽으로 서너 걸음만 더 다가가서 위쪽 역명판을 비춰 보실래요?"
+            if (draftSpeech.contains("None") || draftSpeech.contains("알수없음") || draftSpeech.contains("알 수 없음") || isValidSlot(slots["unreadableReason"])) {
+                draftSpeech = coachPhysicalViewFindingKo(slots["unreadableReason"], "SIGN")
             }
             return Triple(skill, draftSpeech, slots)
         }
 
-        // Layer 2 Live Seoul Bus & Called Taxi Enrichment for BUS_STOP (Fixes LUM-29 & UC-15)
+        // Layer 2 Live Seoul Bus & Called Taxi Enrichment for BUS_STOP (Zero-Hardcoding)
         if (skill.id == "BUS_STOP") {
             val obsPlate = slots["taxiPlate"]?.takeIf { isValidSlot(it) }
-            if (obsPlate != null) {
+            if (obsPlate != null && expectedTaxiPlate.isNotBlank()) {
                 val color = slots["taxiColor"] ?: "택시"
                 val model = slots["taxiModel"] ?: "승용차"
-                if (expectedTaxiPlate.isNotBlank()) {
-                    val isMatch = obsPlate.replace(" ", "").endsWith(expectedTaxiPlate.replace(" ", "").takeLast(4))
-                    val taxiSpeech = if (isMatch) {
-                        "네, 호출하신 $color $model $obsPlate 차량이 맞아요! 지금 걸어가시는 정면 세 걸음 앞에 뒷좌석 오른쪽 문 손잡이가 있어요."
-                    } else {
-                        "앞에 멈춘 $color $model 차량은 번호가 $obsPlate 번이라 호출하신 $expectedTaxiPlate 차량이 아니에요. 잠시 더 기다려 주세요."
-                    }
-                    return Triple(skill, taxiSpeech, slots)
+                val isMatch = obsPlate.replace(" ", "").endsWith(expectedTaxiPlate.replace(" ", "").takeLast(4))
+                val taxiSpeech = if (isMatch) {
+                    "네, 호출하신 $color $model $obsPlate 차량이 맞아요! 지금 걸어가시는 정면 세 걸음 앞에 뒷좌석 오른쪽 문 손잡이가 있어요."
+                } else {
+                    "앞에 멈춘 $color $model 차량은 번호가 $obsPlate 번이라 호출하신 $expectedTaxiPlate 차량이 아니에요. 잠시 더 기다려 주세요."
                 }
+                return Triple(skill, taxiSpeech, slots)
             }
             val arsId = slots["arsId"] ?: Regex("(\\d{2}-\\d{3}|\\b\\d{5}\\b)").find(draftSpeech)?.groupValues?.get(1)
             val route = slots["route"] ?: Regex("(\\d{2,4})번").find(draftSpeech)?.groupValues?.get(1)
-            if (arsId != null || route != null) {
-                val liveBusInfo = fetchSeoulBusStopLive(arsId ?: "22001", route)
+            if (arsId != null && route != null) {
+                val liveBusInfo = fetchSeoulBusStopLive(arsId, route)
                 if (liveBusInfo != null) {
                     return Triple(skill, cleanMovementRelativeDirection("$liveBusInfo $draftSpeech"), slots)
                 }
             }
+            if (isValidSlot(slots["unreadableReason"])) {
+                return Triple(skill, coachPhysicalViewFindingKo(slots["unreadableReason"], "SIGN"), slots)
+            }
         }
 
-        // Layer 2 Real-Date Food Expiry D-Day Calculator for SMART_READER (UC-02)
+        // Layer 2 Real-Date Food Expiry D-Day Calculator & Confounder Defense for SMART_READER (UC-02)
         if (skill.id == "SMART_READER") {
+            if (isValidSlot(slots["unreadableReason"])) {
+                return Triple(skill, coachPhysicalViewFindingKo(slots["unreadableReason"], "HANDHELD_ITEM"), slots)
+            }
             val expRaw = slots["expiryDate"] ?: Regex("(20\\d{2}[-.]\\d{2}[-.]\\d{2})").find(draftSpeech)?.groupValues?.get(1)
             val prod = slots["product"]?.takeIf { isValidSlot(it) } ?: "식품"
+            val dateType = (slots["dateType"] ?: "EXPIRY").uppercase()
+            if (dateType == "MANUFACTURED" && expRaw != null) {
+                return Triple(skill, "$prod 제조일자가 $expRaw 로 적혀 있어요. 소비기한은 용기 다른 면에 적혀 있으니 천천히 반 바퀴 돌려 비춰 보실래요?", slots)
+            }
             if (expRaw != null) {
                 try {
                     val expDate = LocalDate.parse(expRaw.replace(".", "-"))

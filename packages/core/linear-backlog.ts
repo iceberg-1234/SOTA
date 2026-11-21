@@ -329,6 +329,36 @@ export const LUMO_LINEAR_TICKETS: readonly LumoTicketSpec[] = [
       "요구사항: PRD.md의 23개 Use Case가 일부 공유 스킬(INDOOR_SPACE, SMART_READER 등)에 뭉쳐 있어 발생하는 규칙 희석(Instruction Drift)을 방지하고, 향후 Use Case가 50~100개로 늘어나도 다른 Use Case의 추론 성능이 떨어지지 않도록 아키텍처 고도화.\n구현사항: 1) STEP_AND_GLASS_DOOR(UC-14), TAXI_MATCHER(UC-15), GROCERY_SCANNER(UC-16), DINING_ASSISTANT(UC-17), APPLIANCE_SAFETY(UC-11/20), RESTROOM_AND_SEAT(UC-12/21), SOCIAL_MEETING(UC-22), KIOSK_COACH(UC-10 dxCm/dyCm 계산 포함) 등 16개 독립 Micro-Skill로 1:1 분리 및 전용 Layer 2 후처리기 탑재, 2) 매 추론 시 현재 Context Gate를 통과한 최대 4개의 Micro-Skill만 프롬프트에 동적 주입하도록 StatefulSkillHarness 및 NativeLumoAiClient.kt 개편 완료.",
   },
   {
+    key: "LUMO-132",
+    title: "[Phase 1] 오픈소스 멀티모달 아키텍처(Omi, LiveKit Agents, MCP) 분석 기반 범용 Skill 설계 메타 스킬(/lumo-skill-architect) 구축",
+    phase: "PHASE_1_SEOUL_POC",
+    priority: 1,
+    status: "Done",
+    labels: ["skill-architect", "open-source", "architecture"],
+    description:
+      "요구사항: BasedHardware/omi(Surface+LatencyClass+TypedSchema), livekit/agent-skills(Task Handoff & Scenario Grading), OpenInterpreter/MCP(Zero-Hardcoding & UnreadableReason) 아키텍처를 분석적으로 반영하여, 새로운 Use Case를 언제나 누구든지 사용할 수 있는 범용 Skill로 변환·검증하는 메타 스킬(.devin/skills/lumo-skill-architect/SKILL.md) 구축 및 SkillSpector 스캔(0/100 LOW) 완료.",
+  },
+  {
+    key: "LUMO-133",
+    title: "[Phase 1] Zero-Hardcoding 범용 Skill 엔진 고도화 (15초 Temporal Slot Cache + UnreadableReason 물리 조준 코칭 + Confounder 방어)",
+    phase: "PHASE_1_SEOUL_POC",
+    priority: 1,
+    status: "Done",
+    labels: ["agent-harness", "zero-hardcoding", "temporal-cache"],
+    description:
+      "요구사항: 모든 Skill에서 특정 역/문번호('5-3')/정류장('22-001') 등 하드코딩된 폴백을 전면 제거하고, 1) 최근 15초 시계열 슬롯 누적기(TemporalSlotCache), 2) 인식 실패 원인별 물리 조준 코칭(TOO_FAR, TOO_CLOSE_BLUR, OCCLUDED_BY_HAND, WRONG_SIDE, TILT_UP), 3) 혼동 요소 방어(제조일자 vs 소비기한 등), 4) 실시간 시각 안전 묘사와 Layer 2 결과 병합 구현 완료.",
+  },
+  {
+    key: "LUMO-134",
+    title: "[Phase 1] English-Core Prompt & Schema + Target-Locale(ko-KR) Output 전환 및 16개 전체 Skill 재생성·검증·APK 업데이트",
+    phase: "PHASE_1_SEOUL_POC",
+    priority: 1,
+    status: "Done",
+    labels: ["english-core", "i18n", "android-apk"],
+    description:
+      "요구사항: 추론 정확도(Instruction Following)와 토큰 효율성, 글로벌 오픈소스 유지보수성을 높이기 위해 내부 시스템 프롬프트·스키마·슬롯 규칙을 영어(English-Core)로 전환하고 최종 발화만 로케일(ko-KR)로 출력하도록 16개 전체 Skill을 재생성 및 QA 검증 후 Android APK 업데이트 완료.",
+  },
+  {
     key: "LUMO-201",
     title: "[Backlog] 국토교통부 TAGO 전국 시내버스·광역지하철 실시간 도착 API 확장 연동",
     phase: "PHASE_2_BACKLOG",

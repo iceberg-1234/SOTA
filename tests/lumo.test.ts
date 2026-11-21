@@ -357,7 +357,7 @@ test("2-Layer StatefulSkillHarness maintains sticky state, assembles dynamic ski
   assert.equal(activeWindow.includes("SMART_READER"), false);
 
   const dynamicPrompt = harness.assembleDynamicPrompt("지금 몇 번 문 앞이야?");
-  assert.match(dynamicPrompt, /직전 상황: SUBWAY_PLATFORM/);
+  assert.match(dynamicPrompt, /Sticky Mode: SUBWAY_PLATFORM/);
 
   const parsedHeader = parseStructuredHarnessOutput(
     "[SUBWAY_PLATFORM | line=2호선, nextStation=교대, door=3-2] 2호선 교대 방면 3-2번 문 앞입니다.",

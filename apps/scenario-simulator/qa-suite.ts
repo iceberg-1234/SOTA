@@ -301,7 +301,45 @@ export async function runFullQaVerificationSuite(): Promise<{
       groceryActiveIds.includes("GROCERY_SCANNER"),
     failedGates: reg07Check.failedGates,
   });
-  // QA-NAV-03: Searching "이마트" -> Brand expansion (이마트24, 이마트에브리데이, 이마트) & Walk Route without %EC%
+  // QA-REG-08: LUMO-132/133/134 Universal Skill Contract (15s TemporalSlotCache + UnreadableReason View-Finding + Manufactured Date Confounder Defense)
+  harness.clearTemporalSlotCache();
+  // Frame 1 observes line & nextStation
+  harness.mergeAndCacheTemporalSlots({ line: "2호선", nextStation: "교대" }, 1000);
+  // Frame 2 (3 seconds later) only observes door=3-2 -> TemporalSlotCache merges both!
+  const mergedTemporal = harness.mergeAndCacheTemporalSlots({ door: "3-2" }, 4000);
+  const smartReaderSkill = harness
+    .getRegisteredSkills()
+    .find((s) => s.id === "SMART_READER")!;
+  const occludedSpeech = await smartReaderSkill.executePostProcess!({
+    mode: "SMART_READER",
+    extractedSlots: { unreadableReason: "OCCLUDED_BY_HAND" },
+    draftSpokenKorean: "",
+  });
+  const manufacturedSpeech = await smartReaderSkill.executePostProcess!({
+    mode: "SMART_READER",
+    extractedSlots: {
+      product: "서울우유",
+      expiryDate: "2026-11-01",
+      dateType: "MANUFACTURED",
+    },
+    draftSpokenKorean: "",
+  });
+  const reg08Check = evaluateSpeechQualityGates(
+    `${occludedSpeech} ${manufacturedSpeech}`,
+    /손가락이 글자 부분을 가리고 있어요.*제조일자가 2026-11-01로 적혀 있어요.*소비기한은 용기 옆면이나 아래쪽에/,
+  );
+  results.push({
+    id: "QA-REG-08",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 LUMO-132~134] 15초 시계열 슬롯 병합(TemporalSlotCache) + 손가락 가림 조준 코칭 + 제조일자/소비기한 혼동 방어",
+    spokenOutput: reg08Check.naturalSpeech,
+    passed:
+      reg08Check.passed &&
+      mergedTemporal.line === "2호선" &&
+      mergedTemporal.nextStation === "교대" &&
+      mergedTemporal.door === "3-2",
+    failedGates: reg08Check.failedGates,
+  });
   const emartSearch = await nav.searchDestinationCandidates({
     query: "이마트",
     originLat: 37.5006,

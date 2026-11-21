@@ -1,4 +1,5 @@
 import {
+  coachPhysicalViewFindingKo,
   isValidObservedSlot,
   type LumoSkillPlugin,
 } from "../core/agent-harness.ts";
@@ -9,6 +10,7 @@ import {
   verifyCalledTaxiOrRideKo,
   verifySubwayPlatformAndTransferKo,
 } from "../core/transit-engine.ts";
+import { findSubwayTransferRule } from "./subway-transfer-db.ts";
 import { KoreaTransitProvider } from "./transit-provider.ts";
 
 const smartReader = new KoreanSmartReader();
@@ -19,9 +21,11 @@ const runtimeVisualMemory = new Map<string, string>([
 ]);
 
 /**
- * 1:1 Micro-Skill Plugin Registry covering all 23 Korean Visually Impaired Use Cases (UC-01 ~ UC-23).
- * Combined with StatefulSkillHarness's Context Gate (max 4 active micro-skills per prompt),
- * scaling the number of Use Cases causes ZERO prompt bloat or cross-scenario interference.
+ * Universal Zero-Hardcoding Micro-Skill Registry (built with `/lumo-skill-architect`):
+ * - English-Core trigger & extraction rules (`E2K` pattern) for high instruction-following accuracy & token efficiency.
+ * - Zero hardcoded dummy entities (no hardcoded `"5-3"` or `"22-001"` fallbacks; looks up dynamic transfer DB or triggers physical view-finding).
+ * - Physics-Aware Active View-Finding (`unreadableReason = TOO_FAR | TOO_CLOSE_BLUR | OCCLUDED_BY_HAND | WRONG_SIDE | TILT_UP | GLARE`).
+ * - Confounder defense (`dateType=EXPIRY vs MANUFACTURED`, indoor window vs train door window).
  */
 export function createKoreanSkillPlugins(
   transitProvider = new KoreaTransitProvider(),
@@ -31,9 +35,9 @@ export function createKoreanSkillPlugins(
       id: "WALKING_SAFETY",
       labelKo: "보행 안전 · 점자블록/저조도(UC-04,05,18)",
       triggerDescriptionKo:
-        "보행로, 점자블록, 공유 킥보드/볼라드(UC-05), 어두운 실내/야간 저조도 구간(UC-18)이 보일 때",
+        "When walking paths, tactile paving (점자블록), obstacles like kickboards/bollards (UC-05), or dim/night indoor-outdoor transitions (UC-18) are visible",
       extractionRulesKo:
-        "헤더: `[WALKING_SAFETY | hazard=킥보드, steps=3]` — 진행 방향 기준 걸음 수와 좌우 회피 방향, 저조도 바닥 평탄도를 구어체로 안내하세요.",
+        "Header: `[WALKING_SAFETY | hazard=킥보드, steps=3, avoidDir=왼쪽]` — Guide in natural Korean using movement-relative direction, step count, and tactile cues (점자블록, 연석, 난간). Never use color-only pavement descriptions.",
       relatedSkillIds: ["STEP_AND_GLASS_DOOR", "CROSSWALK_SIGNAL", "BUS_STOP"],
       priority: "P0_SAFETY",
       earcon: "HAZARD_ALERT",
@@ -42,9 +46,9 @@ export function createKoreanSkillPlugins(
       id: "STEP_AND_GLASS_DOOR",
       labelKo: "무표시 계단 · 단차 · 투명유리문 감지(UC-14)",
       triggerDescriptionKo:
-        "대비감도가 낮은 회색 내리막 계단 첫 단, 보도 연석 단차, 프레임 없는 투명 통유리문과 손잡이가 보일 때",
+        "When low-contrast grey stairs/curb drop-offs (내리막 계단 첫 단/단차) or frameless transparent glass doors (투명 통유리문) and door handles are ahead",
       extractionRulesKo:
-        "헤더: `[STEP_AND_GLASS_DOOR | type=내리막계단또는투명유리문, steps=2, handleSide=오른쪽, action=당기기]` — 평지나 열린 공간으로 착각하기 쉬운 단차/유리문과 손잡이/난간 위치를 즉시 경고하세요.",
+        "Header: `[STEP_AND_GLASS_DOOR | type=내리막계단|투명유리문, steps=2, handleSide=오른쪽, action=당기기]` — Warn immediately about low-contrast drop-offs or frameless glass doors and specify the handrail or pull/push handle side.",
       relatedSkillIds: ["WALKING_SAFETY", "INDOOR_SPACE"],
       priority: "P0_SAFETY",
       earcon: "HAZARD_ALERT",
@@ -66,9 +70,9 @@ export function createKoreanSkillPlugins(
       id: "CROSSWALK_SIGNAL",
       labelKo: "횡단보도 · 역광 신호등 인식(UC-06,19)",
       triggerDescriptionKo:
-        "횡단보도 대기선이나 보행자 신호등(적색/녹색/잔여초 및 역광 눈부심 구간 UC-19)이 보일 때",
+        "When a crosswalk waiting line or pedestrian traffic light (보행자 신호등, red/green, countdown seconds, or high-glare backlit signal UC-19) is visible",
       extractionRulesKo:
-        "헤더: `[CROSSWALK_SIGNAL | signal=GREEN, remainSec=24]` — 역광 속에서도 신호등 색깔과 잔여 초, 정면 진행 방향을 즉시 안내하세요.",
+        "Header: `[CROSSWALK_SIGNAL | signal=GREEN|RED, remainSec=24]` — State immediately whether the pedestrian light is red (wait) or green (remaining seconds + straight alignment).",
       relatedSkillIds: ["WALKING_SAFETY", "BUS_STOP"],
       priority: "P0_SAFETY",
       earcon: "SIGNAL_GREEN",
@@ -77,9 +81,9 @@ export function createKoreanSkillPlugins(
       id: "BUS_STOP",
       labelKo: "버스 정류장 · 실시간 노선 매칭(UC-07,19)",
       triggerDescriptionKo:
-        "버스 정류장 표지판(5자리 ARS 번호), 역광 BIT 전광판(UC-19), 진입 시내버스가 보일 때",
+        "When a bus stop sign (5-digit ARS-ID 정류소번호), BIT LED arrival board (UC-19), or approaching city bus is visible",
       extractionRulesKo:
-        "헤더: `[BUS_STOP | arsId=22-001, route=140, direction=양재역]` — 정류소 번호나 진입 버스 번호와 앞문까지 걸음 수를 안내하세요.",
+        "Header: `[BUS_STOP | arsId=..., route=..., direction=..., unreadableReason=TOO_FAR|TILT_UP|GLARE]` — Extract `arsId` or `route` ONLY when legible. Never guess; if illegible, set `unreadableReason`.",
       relatedSkillIds: ["WALKING_SAFETY", "TAXI_MATCHER", "CROSSWALK_SIGNAL"],
       priority: "P1_NAVIGATION",
       earcon: "TRANSIT_ARRIVING",
@@ -91,10 +95,11 @@ export function createKoreanSkillPlugins(
           obs.activeMission?.goalText ||
           "방면";
 
-        if (isValidObservedSlot(arsId) || isValidObservedSlot(route)) {
+        // Zero-Hardcoding Rule: Only query live Bus API when at least one real identifier (`arsId` or `route`) was observed!
+        if (isValidObservedSlot(arsId) && isValidObservedSlot(route)) {
           const live = await transitProvider.fetchSeoulBusArrival({
-            arsId: isValidObservedSlot(arsId) ? arsId! : "22-001",
-            targetRouteNumber: isValidObservedSlot(route) ? route! : "140",
+            arsId: arsId!,
+            targetRouteNumber: route!,
           });
           if (live.arrivals.length > 0) {
             const first = live.arrivals[0];
@@ -114,8 +119,14 @@ export function createKoreanSkillPlugins(
                 },
               ],
             });
-            return `${verified.spokenGuidance} ${obs.draftSpokenKorean}`;
+            return verified.spokenGuidance;
           }
+        }
+        if (isValidObservedSlot(obs.extractedSlots.unreadableReason)) {
+          return coachPhysicalViewFindingKo(
+            obs.extractedSlots.unreadableReason,
+            "SIGN",
+          );
         }
         return obs.draftSpokenKorean;
       },
@@ -124,9 +135,9 @@ export function createKoreanSkillPlugins(
       id: "TAXI_MATCHER",
       labelKo: "호출 택시 · 장애인콜택시 번호판 매칭(UC-15)",
       triggerDescriptionKo:
-        "호출한 택시나 장애인 콜택시(장콜)가 진입하거나 정차해 번호판·색상·차종과 승차문을 확인할 때",
+        "When a called taxi or wheelchair call-taxi (장애인 콜택시) pulls up and its license plate, color, model, and passenger door handle are visible",
       extractionRulesKo:
-        "헤더: `[TAXI_MATCHER | taxiPlate=34바5678, taxiColor=흰색, taxiModel=쏘나타, doorDistM=2.1]` — 차량 색상, 차종, 번호판 전체 숫자와 뒷좌석 오른쪽 문 손잡이 위치를 정확히 읽어주세요.",
+        "Header: `[TAXI_MATCHER | taxiPlate=34바5678, taxiColor=흰색, taxiModel=쏘나타, doorDistM=2.1]` — Read license plate digits, vehicle color/model, and steps to the rear right door handle.",
       relatedSkillIds: ["WALKING_SAFETY", "BUS_STOP"],
       priority: "P1_NAVIGATION",
       earcon: "TRANSIT_ARRIVING",
@@ -148,44 +159,64 @@ export function createKoreanSkillPlugins(
       id: "SUBWAY_PLATFORM",
       labelKo: "지하철 승강장 · 빠른 환승(UC-08,23)",
       triggerDescriptionKo:
-        "지하철 승강장, 스크린도어 호차-문번호(예: 3-2), 상단 역명판/방면 표지판이 보일 때",
+        "When standing on a subway platform before boarding, with screen-door car-door codes (스크린도어 호차-문번호 e.g. 3-2) or overhead direction signs visible",
       extractionRulesKo:
-        "헤더: `[SUBWAY_PLATFORM | line=2호선, nextStation=교대, door=3-2, transferLine=3호선]` — 스크린도어 번호와 다음 역 방면이 실제로 읽힐 때만 적고, 안 보이면 서너 걸음 다가서서 위쪽 역명판을 비춰 달라고 말하세요.",
+        "Header: `[SUBWAY_PLATFORM | line=2호선, nextStation=교대, door=3-2, transferStation=교대역, transferLine=3호선, unreadableReason=TOO_FAR|TILT_UP]` — Extract `nextStation` and `door` ONLY when clearly legible (never output 'None'). Do NOT claim train doors are open unless the physical gap is visible.",
       relatedSkillIds: ["SUBWAY_ON_BOARD", "TRANSFER_CORRIDOR", "WALKING_SAFETY"],
       priority: "P1_NAVIGATION",
       earcon: "TRANSIT_ARRIVING",
       executePostProcess: async (obs) => {
         const door = obs.extractedSlots.door;
         const nextStation = obs.extractedSlots.nextStation;
-        const line = obs.extractedSlots.line;
+        const line = obs.extractedSlots.line || "2호선";
+        const transferLine = obs.extractedSlots.transferLine || "3호선";
+        const transferStn =
+          obs.extractedSlots.transferStation ||
+          (nextStation ? `${nextStation.replace(/역$/, "")}역` : "");
 
         if (isValidObservedSlot(door) && isValidObservedSlot(nextStation)) {
           const live = await transitProvider.fetchSeoulSubwayArrival({
             stationName: nextStation!,
-            lineName: isValidObservedSlot(line) ? line! : "2호선",
+            lineName: line,
             directionText: `${nextStation} 방면`,
           });
 
+          // Zero-Hardcoding Rule: Look up dynamic transfer rule from DB (`findSubwayTransferRule`) instead of hardcoding "5-3"!
+          const matchedRule = transferStn
+            ? findSubwayTransferRule({
+                stationName: transferStn,
+                fromLine: line,
+                toLine: transferLine,
+              })
+            : null;
+
           return verifySubwayPlatformAndTransferKo({
-            lineName: isValidObservedSlot(line) ? line! : "지하철",
+            lineName: line,
             intendedDirectionStation: nextStation!,
             observedNextStationOnSign: nextStation!,
             observedScreenDoorCode: door!,
             arrivalMinutes: live.arrivalMinutes,
-            transferOption: {
-              transferStationName: `${nextStation!.replace(/역$/, "")}역`,
-              targetLineName: isValidObservedSlot(obs.extractedSlots.transferLine)
-                ? obs.extractedSlots.transferLine!
-                : "환승 노선",
-              bestScreenDoorCode: "5-3",
-              facilityType: "빠른 환승 계단",
-              higherCarNumberDirectionWhenFacingTrack: "RIGHT",
-            },
+            transferOption: matchedRule
+              ? {
+                  transferStationName: matchedRule.stationName,
+                  targetLineName: matchedRule.toLine,
+                  bestScreenDoorCode: matchedRule.fastTransferDoor,
+                  facilityType: "빠른 환승 계단",
+                  higherCarNumberDirectionWhenFacingTrack:
+                    matchedRule.higherCarDirectionWhenFacingDoor,
+                }
+              : undefined,
           }).spokenGuidance;
         }
 
-        if (/None|알수없음|알 수 없음/i.test(obs.draftSpokenKorean)) {
-          return "지하철 승강장이지만 현재 위치에서는 행선지 표지판이나 스크린도어 번호 글자가 선명하게 보이지 않습니다. 진행 방향 정면 스크린도어 쪽으로 3~4걸음 다가선 뒤 유리문 상단 표지판을 바라봐 주세요.";
+        if (
+          /None|알수없음|알 수 없음/i.test(obs.draftSpokenKorean) ||
+          isValidObservedSlot(obs.extractedSlots.unreadableReason)
+        ) {
+          return coachPhysicalViewFindingKo(
+            obs.extractedSlots.unreadableReason,
+            "SIGN",
+          );
         }
 
         return obs.draftSpokenKorean;
@@ -195,9 +226,9 @@ export function createKoreanSkillPlugins(
       id: "SUBWAY_ON_BOARD",
       labelKo: "지하철 탑승 중 · 정거장/하차문 안내(UC-08,23)",
       triggerDescriptionKo:
-        "지하철 객차 내부(출입문 유리창, 손잡이, 노선도, 객차 내 전광판)가 보일 때",
+        "When inside a moving or stopped subway train cabin (train door window, handrails, passengers, in-cabin route map/LED display)",
       extractionRulesKo:
-        "헤더: `[SUBWAY_ON_BOARD | currentStation=건대입구]` — 객차 안에서는 출입문 옆 손잡이를 잡고 서 있게 안내하고, 현재 역·목적지까지 남은 정거장 수·내릴 문 방향(오른쪽/왼쪽)을 알려주세요.",
+        "Header: `[SUBWAY_ON_BOARD | currentStation=...]` — Remind the user to hold the handrail near the door (never tell them to hunt for empty seats or warn that the train door window is a blocked room wall). Announce current station, remaining stops to destination, and opening door side (오른쪽/왼쪽).",
       relatedSkillIds: ["SUBWAY_PLATFORM", "TRANSFER_CORRIDOR"],
       priority: "P1_NAVIGATION",
       earcon: "SCANNING_TICK",
@@ -206,9 +237,9 @@ export function createKoreanSkillPlugins(
       id: "TRANSFER_CORRIDOR",
       labelKo: "지하철 환승 · 출구 통로 내비(UC-09,23)",
       triggerDescriptionKo:
-        "지하철 환승 유도 표지판, 출구 번호 표지판(예: 1번 출구), 개찰구, 점자블록 갈림길이 보일 때",
+        "When walking through subway transfer corridors, exit number signs (출구 표지판 e.g. 1번 출구), fare gates (개찰구), or tactile paving junctions after alighting",
       extractionRulesKo:
-        "헤더: `[TRANSFER_CORRIDOR | targetLine=5호선, exit=1번출구]` — 환승 유도선이나 목표 출구 번호 방향과 점자블록/계단 위치를 연속으로 안내하세요.",
+        "Header: `[TRANSFER_CORRIDOR | targetLine=..., exit=...]` — Guide continuously toward the target transfer line or target exit number along tactile paving, stairs, or escalators.",
       relatedSkillIds: ["SUBWAY_PLATFORM", "RESTROOM_AND_SEAT", "WALKING_SAFETY"],
       priority: "P1_NAVIGATION",
       earcon: "TARGET_FOUND",
@@ -217,9 +248,9 @@ export function createKoreanSkillPlugins(
       id: "RESTROOM_AND_SEAT",
       labelKo: "공공화장실 성별/빈칸 · 카페 빈 좌석(UC-12,21)",
       triggerDescriptionKo:
-        "공공화장실 남/녀 픽토그램 및 빈 칸(초록/빨강 표시)·세면대(UC-21), 또는 카페/식당의 빈 좌석과 바닥 가방 장애물(UC-12)이 보일 때",
+        "When public restroom gender pictograms (남/녀 화장실), stall occupancy indicators (초록/빨강 사용중 표시), sinks (UC-21), or empty cafe seats & floor bags (UC-12) are visible",
       extractionRulesKo:
-        "헤더: `[RESTROOM_AND_SEAT | gender=남자화장실, direction=왼쪽, vacantStall=2, sink=오른쪽]` — 화장실 성별 입구와 빈 칸 번호·세면대 위치, 또는 카페 빈 좌석까지 걸음 수와 바닥 장애물을 안내하세요.",
+        "Header: `[RESTROOM_AND_SEAT | gender=남자화장실|여자화장실, direction=왼쪽|오른쪽, vacantStall=2, sink=오른쪽]` — Identify restroom gender entrance, vacant stall number, sink location, or steps to an empty seat while avoiding floor obstacles.",
       relatedSkillIds: ["TRANSFER_CORRIDOR", "INDOOR_SPACE"],
       priority: "P1_NAVIGATION",
       earcon: "TARGET_FOUND",
@@ -242,9 +273,9 @@ export function createKoreanSkillPlugins(
       id: "KIOSK_COACH",
       labelKo: "무인 키오스크 · 엘리베이터 1층 손끝 코칭(UC-10)",
       triggerDescriptionKo:
-        "무인 키오스크 화면이나 엘리베이터 층수 버튼 패널(LUM-47)과 사용자의 손가락이 보일 때",
+        "When a touchscreen kiosk or elevator floor button panel (LUM-47) and the user's hand/fingertip are visible",
       extractionRulesKo:
-        "헤더: `[KIOSK_COACH | target=1층버튼또는아메리카노, dxCm=3, dyCm=-2, floorLit=false]` — 엘리베이터는 1층 버튼 점등 여부를 먼저 확인하고, 현재 손가락에서 목표 버튼까지 가로(dxCm)/세로(dyCm) 몇 cm 이동할지 추출하세요.",
+        "Header: `[KIOSK_COACH | target=1층버튼|메뉴명, dxCm=3, dyCm=-2, floorLit=false]` — For elevators, verify whether the exit floor (1층/L/G) is lit first. Extract horizontal (`dxCm`) and vertical (`dyCm`) centimeter offset from the user's fingertip to the target button.",
       relatedSkillIds: ["INDOOR_SPACE", "APPLIANCE_SAFETY"],
       priority: "P1_NAVIGATION",
       earcon: "TARGET_FOUND",
@@ -270,9 +301,9 @@ export function createKoreanSkillPlugins(
       id: "APPLIANCE_SAFETY",
       labelKo: "평면 인덕션 잔열(H) · 정수기 · 가전 판독(UC-11,20)",
       triggerDescriptionKo:
-        "주방 평면 인덕션 화구 켜짐/잔열 H 표시(UC-20), 평면 터치 정수기 온수/냉수 버튼(UC-11), 세탁기/전자레인지 LED 창이 보일 때",
+        "When a flat induction stove burner/residual heat 'H' indicator (UC-20), touch water dispenser hot/cold buttons (UC-11), or washer/microwave LED panel is visible",
       extractionRulesKo:
-        "헤더: `[APPLIANCE_SAFETY | appliance=인덕션, zone=오른쪽아래, power=7단계, residualHeat=true]` — 인덕션 화구 가열 단계와 잔열(H) 화상 위험, 정수기 온수 위치, 가전 남은 시간을 정확히 판독하세요.",
+        "Header: `[APPLIANCE_SAFETY | appliance=인덕션|정수기|세탁기, zone=오른쪽아래, power=7단계, residualHeat=true|false]` — Warn immediately if residual heat ('H' / Hot) or hot water is present, and read active cycle/remaining minutes.",
       relatedSkillIds: ["KIOSK_COACH", "INDOOR_SPACE"],
       priority: "P0_SAFETY",
       earcon: "HAZARD_ALERT",
@@ -295,15 +326,25 @@ export function createKoreanSkillPlugins(
       id: "SMART_READER",
       labelKo: "약봉지/안약 · 소비기한 D-Day · 고지서 요약(UC-01,02,13)",
       triggerDescriptionKo:
-        "약봉지/안약(UC-01), 냉장고 식품 소비기한(UC-02), 관리비 고지서/택배 송장(UC-13)이 가까이 보일 때",
+        "When medicine pouches/eye-drops (UC-01), food expiration labels (UC-02), or utility bills/parcel labels (UC-13) are held in front of the camera",
       extractionRulesKo:
-        "헤더: `[SMART_READER | docType=소비기한, product=우유, expiryDate=2026-11-18]` — 약봉지는 복용 시점/효능을, 식품은 소비기한 날짜(YYYY-MM-DD)를, 고지서/택배는 핵심 3요소만 요약하세요.",
+        "Header: `[SMART_READER | docType=소비기한|약봉지|고지서, product=서울우유, expiryDate=2026-11-18, dateType=EXPIRY|MANUFACTURED, unreadableReason=TOO_CLOSE_BLUR|OCCLUDED_BY_HAND|WRONG_SIDE]` — CRITICAL CONFOUNDER RULE: Distinguish expiration date (`소비기한/유통기한`, `dateType=EXPIRY`) from manufacturing date (`제조일자`, `dateType=MANUFACTURED`). If the label is covered by fingers, blurry, or facing the wrong side, set `unreadableReason`.",
       relatedSkillIds: ["GROCERY_SCANNER", "INDOOR_SPACE"],
       priority: "P2_COMPANION",
       earcon: "SCANNING_TICK",
       executePostProcess: async (obs) => {
+        if (isValidObservedSlot(obs.extractedSlots.unreadableReason)) {
+          return coachPhysicalViewFindingKo(
+            obs.extractedSlots.unreadableReason,
+            "HANDHELD_ITEM",
+          );
+        }
         const expiryDate = obs.extractedSlots.expiryDate;
         const product = obs.extractedSlots.product;
+        const dateType = (obs.extractedSlots.dateType || "EXPIRY").toUpperCase();
+        if (dateType === "MANUFACTURED") {
+          return `${product || "상품"}의 제조일자가 ${expiryDate}로 적혀 있어요. 소비기한은 용기 옆면이나 아래쪽에 따로 적혀 있으니 살짝 돌려 비춰 보실래요?`;
+        }
         if (
           isValidObservedSlot(expiryDate) &&
           /^\d{4}-\d{2}-\d{2}$/.test(expiryDate!) &&
@@ -323,13 +364,19 @@ export function createKoreanSkillPlugins(
       id: "GROCERY_SCANNER",
       labelKo: "마트/편의점 유사 용기 맛 · 제로 · 1+1 행사 리더(UC-16)",
       triggerDescriptionKo:
-        "편의점이나 마트에서 캔/페트병/라면/통조림 상품이나 진열대 가격표·1+1 행사 라벨을 볼 때",
+        "When holding or viewing convenience store / supermarket cans, bottles, ramen, price tags, or 1+1 / 2+1 promotion badges (UC-16)",
       extractionRulesKo:
-        "헤더: `[GROCERY_SCANNER | product=코카콜라, flavor=레몬향500ml, zeroSugar=true, price=2000, promo=1+1]` — 정확한 상품명, 맛, 제로슈거 여부, 가격, 1+1/2+1 행사 여부를 추출하세요.",
+        "Header: `[GROCERY_SCANNER | product=코카콜라, flavor=레몬향500ml, zeroSugar=true|false, price=2000, promo=1+1|2+1|일반, unreadableReason=...]` — Extract exact product name, flavor variant, Zero-Sugar status, price in KRW, and promotion badge.",
       relatedSkillIds: ["SMART_READER", "KIOSK_COACH"],
       priority: "P2_COMPANION",
       earcon: "TARGET_FOUND",
       executePostProcess: async (obs) => {
+        if (isValidObservedSlot(obs.extractedSlots.unreadableReason)) {
+          return coachPhysicalViewFindingKo(
+            obs.extractedSlots.unreadableReason,
+            "HANDHELD_ITEM",
+          );
+        }
         const product = obs.extractedSlots.product;
         if (isValidObservedSlot(product)) {
           return smartReader.summarizeGroceryProductKo({
@@ -347,9 +394,9 @@ export function createKoreanSkillPlugins(
       id: "DINING_ASSISTANT",
       labelKo: "식사 접시/식판 반찬 배치 · 생선 가시 · 남은 양(UC-17)",
       triggerDescriptionKo:
-        "식탁 위 밥그릇, 국, 식판, 접시 위 반찬이나 음식이 보일 때",
+        "When looking down at a dining table, meal tray (식판), or plate with rice, soup, and side dishes (UC-17)",
       extractionRulesKo:
-        "헤더: `[DINING_ASSISTANT | frontLeft=흰쌀밥, frontRight=된장국, topCenter=고등어구이, boneHazard=true]` — 앞쪽 왼쪽/오른쪽, 위쪽 칸 기준 음식 배치와 생선 가시/뼈 주의, 식사 후반 남은 반찬 위치를 안내하세요.",
+        "Header: `[DINING_ASSISTANT | frontLeft=흰쌀밥, frontRight=된장국, topCenter=고등어구이, boneHazard=true|false]` — Describe food positions relative to front-left/right and top sections, warn about fish bones/thorns, and note remaining pieces.",
       relatedSkillIds: ["INDOOR_SPACE", "SMART_READER"],
       priority: "P2_COMPANION",
       earcon: "TARGET_FOUND",
@@ -383,9 +430,9 @@ export function createKoreanSkillPlugins(
       id: "INDOOR_SPACE",
       labelKo: "실내 동선 · 집안 물건 위치 기억/찾기 · 복장 점검(UC-03)",
       triggerDescriptionKo:
-        "집안 생활 물건(에어팟, 안경, 열쇠, 지갑) 위치 기억/찾기 및 외출 복장 얼룩 점검(UC-03), 또는 실내 출입문 탐색 시",
+        "When indexing or recalling household object locations (에어팟, 안경, 열쇠, 지갑), checking outfit stains/colors (UC-03), or navigating indoor room doors",
       extractionRulesKo:
-        "헤더: `[INDOOR_SPACE | rememberedItem=에어팟, itemLocation=소파 오른쪽 쿠션 옆, recallItem=에어팟]` — 생활 물건이 보이면 위치를 기록하고, 정면에 창문/책상이 막혀 있으면 뒤로 돌아 방문을 찾게 안내하세요.",
+        "Header: `[INDOOR_SPACE | rememberedItem=에어팟, itemLocation=소파 오른쪽 쿠션 옆, recallItem=에어팟]` — Index visible personal items with their landmark location, or guide around indoor furniture toward the exit door.",
       relatedSkillIds: ["SMART_READER", "APPLIANCE_SAFETY", "WALKING_SAFETY"],
       priority: "P2_COMPANION",
       earcon: "TARGET_FOUND",
@@ -409,9 +456,9 @@ export function createKoreanSkillPlugins(
       id: "SOCIAL_MEETING",
       labelKo: "상대방 명함/악수 제스처 · 회의 슬라이드 요약(UC-22)",
       triggerDescriptionKo:
-        "대화 상대방이 명함/악수/물건을 건네며 손을 내밀거나 회의실 프로젝터/모니터 발표 슬라이드가 보일 때",
+        "When a conversation partner extends a hand for a handshake or hands over a business card/cup, or when a meeting projector/monitor slide is visible (UC-22)",
       extractionRulesKo:
-        "헤더: `[SOCIAL_MEETING | cueType=HANDING_OBJECT또는PRESENTATION_SLIDE, title=미팅상대방또는슬라이드제목, detail=오른손으로 명함을 건네고]` — 상대방의 손짓 위치나 발표 슬라이드 핵심을 1~2문장으로 코칭하세요.",
+        "Header: `[SOCIAL_MEETING | cueType=HANDING_OBJECT|PRESENTATION_SLIDE, title=미팅상대방|슬라이드제목, detail=오른손으로 명함을 건네고]` — Coach the user on the partner's hand gesture or summarize the presentation slide into 1-2 sentences.",
       relatedSkillIds: ["INDOOR_SPACE", "SMART_READER"],
       priority: "P2_COMPANION",
       earcon: "TARGET_FOUND",

@@ -98,6 +98,59 @@ export function sanitizeBlindFriendlySpeech(rawSpeech: string): string {
   return toNaturalSpokenKorean(rawSpeech);
 }
 
+export type UnreadableReasonCode =
+  | "TOO_FAR"
+  | "TOO_CLOSE_BLUR"
+  | "OCCLUDED_BY_HAND"
+  | "WRONG_SIDE"
+  | "TILT_UP"
+  | "TILT_DOWN"
+  | "GLARE";
+
+/**
+ * Physics-Aware Active View-Finding Coach (inspired by OpenInterpreter/MCP failure-reason contracts):
+ * Guides the blind user on *how* to adjust their hand, object, or head based on why the target is unreadable.
+ */
+export function coachPhysicalViewFindingKo(
+  reason?: string,
+  targetDomain: "SIGN" | "HANDHELD_ITEM" | "PANEL" = "SIGN",
+): string {
+  switch ((reason ?? "").toUpperCase()) {
+    case "TOO_CLOSE_BLUR":
+      return "카메라와 너무 가까워 초점이 흐려졌어요. 물건을 얼굴에서 한 뼘 정도만 뒤로 떼어 보실래요?";
+    case "OCCLUDED_BY_HAND":
+      return "손가락이 글자 부분을 가리고 있어요. 손가락을 가장자리 쪽으로 살짝만 옮겨 보실래요?";
+    case "WRONG_SIDE":
+      return "지금 비추신 면에는 찾는 정보가 없어요. 용기나 봉투를 천천히 반 바퀴 돌려 보실래요?";
+    case "TILT_UP":
+      return "표지판이 위쪽에 있어서 화면에 다 안 잡혔어요. 고개를 살짝만 위로 들어 비춰 보실래요?";
+    case "TILT_DOWN":
+      return "대상이 아래쪽에 있어요. 고개를 살짝 아래로 숙여 비춰 보실래요?";
+    case "GLARE":
+      return "빛 반사 때문에 글씨가 하얗게 번져 보여요. 각도를 옆으로 살짝만 틀어 보실래요?";
+    case "TOO_FAR":
+    default:
+      return targetDomain === "HANDHELD_ITEM"
+        ? "글씨가 작아 아직 선명하지 않아요. 물건을 가슴 높이에서 조금만 더 가까이 비춰 보실래요?"
+        : "지하철 승강장이지만 현재 위치에서는 행선지 표지판이나 스크린도어 번호 글자가 선명하게 보이지 않습니다. 진행 방향 정면 스크린도어 쪽으로 3~4걸음 다가선 뒤 유리문 상단 표지판을 바라봐 주세요.";
+  }
+}
+
+/**
+ * Preserves real-time obstacle or crowd warnings detected in `draftSpeech` when Layer 2 generates
+ * a deterministic calculation result.
+ */
+export function mergeSafetyObservationWithLayer2(
+  layer2Speech: string,
+  draftSpeech: string,
+): string {
+  if (!draftSpeech || layer2Speech.includes(draftSpeech)) return layer2Speech;
+  if (/조심|주의|내리는\s*사람|승객|장애물|킥보드|단차|가방/.test(draftSpeech)) {
+    return `${layer2Speech} ${draftSpeech}`;
+  }
+  return layer2Speech;
+}
+
 export interface SkillObservation {
   mode: AutoDetectedSceneMode;
   extractedSlots: Record<string, string>;
@@ -233,11 +286,46 @@ export class StatefulSkillHarness {
   private lastSpokenKorean = "";
   private activeMission: ActiveMissionState | null = null;
   private readonly conversationHistory: ConversationTurn[] = [];
+  private readonly temporalSlotCache = new Map<
+    string,
+    { value: string; timestampMs: number }
+  >();
+  private static readonly SLOT_TTL_MS = 15_000;
 
   constructor(initialSkills: readonly LumoSkillPlugin[] = []) {
     for (const sk of initialSkills) {
       this.registerSkill(sk);
     }
+  }
+
+  /**
+   * 15-second Rolling Temporal Slot Cache:
+   * Prevents Single-Frame Amnesia when walking (e.g. Frame 1 reads `line=2호선, nextStation=교대`,
+   * Frame 2 reads `door=3-2` -> merges both within a 15s window).
+   */
+  mergeAndCacheTemporalSlots(
+    newSlots: Record<string, string>,
+    nowMs = Date.now(),
+  ): Record<string, string> {
+    for (const [k, entry] of this.temporalSlotCache.entries()) {
+      if (nowMs - entry.timestampMs > StatefulSkillHarness.SLOT_TTL_MS) {
+        this.temporalSlotCache.delete(k);
+      }
+    }
+    for (const [k, v] of Object.entries(newSlots)) {
+      if (isValidObservedSlot(v)) {
+        this.temporalSlotCache.set(k, { value: v, timestampMs: nowMs });
+      }
+    }
+    const merged: Record<string, string> = {};
+    for (const [k, entry] of this.temporalSlotCache.entries()) {
+      merged[k] = entry.value;
+    }
+    return { ...merged, ...newSlots };
+  }
+
+  clearTemporalSlotCache(): void {
+    this.temporalSlotCache.clear();
   }
 
   appendConversationTurn(role: "user" | "assistant", text: string): void {
@@ -394,14 +482,15 @@ export class StatefulSkillHarness {
     }
 
     const lines = [
-      `[Layer 1: 상태 유지형 스킬 라우터 | 직전 상황: ${this.stickyMode}]`,
-      `당신은 시각장애인 사용자의 옆에서 함께 걸으며 대화하는 다정한 AI 동반자 '루모'입니다 (Gemini Live / Pickle 스타일).`,
-      `카메라 시야를 보고 맨 앞에만 시스템용 \`[모드ID | 키=값]\` 헤더를 적고, 그 뒤에 이어지는 문장은 **기계적인 스크린 리더기가 아니라 옆에 있는 친구/길동무가 말하듯 자연스러운 구어체(~해요, ~있어요, ~할까요?)로 짧게 1~2문장(70자 내외)**만 작성하세요.`,
-      `⚠️ [절대 지켜야 할 대화형 음성 UX 규칙]:`,
-      `1. **기호·화살표·괄호 절대 금지**: 음성으로 읽힐 본문에는 \`→\`, \`[\`, \`]\`, \`(\`, \`)\`, \`·\`, \`/\` 같은 기호나 '1/4단계' 같은 딱딱한 보고서 말머리를 절대 쓰지 마세요.`,
-      `2. **시계 방향('12시 방향') 및 색상 지시('밝은 색 보도') 절대 금지**: 대신 "지금 걸어가시는 방향 그대로 다섯 걸음만 직진해 보세요", "오른쪽으로 살짝 비켜가 볼까요?"처럼 자연스럽게 말하세요.`,
-      `3. **창문/책상/벽 앞 충돌 방지 (LUM-49/50)**: 정면에 창문, 블라인드, 책상, 벽이 보이면 절대 앞으로 걸어 나가라고 하지 마세요! "어이쿠, 바로 앞은 창문(또는 책상)이라 막혀 있어요. 뒤로 돌아서서 방문 쪽을 먼저 비춰 보실래요?"라고 다정하게 말려주세요.`,
-      `4. **엘리베이터 층수 코칭 (LUM-47)**: 외출 중 엘리베이터 버튼이 보이면 닫힘 버튼보다 먼저 1층 버튼에 불이 들어와 있는지 봐주고, 안 눌려 있으면 "일단 1층 버튼부터 눌러볼까요? 지금 손에서 조금만 아래로 내려보세요"처럼 대화하듯 코칭하세요.`,
+      `[Layer 1: Context-Gated Micro-Skill Router | Sticky Mode: ${this.stickyMode} | Target Output Locale: ko-KR]`,
+      `You are 'Lumo', a warm, conversational AI smart-glass companion walking alongside a visually impaired user in Korea (Gemini Live / Pickle style).`,
+      `Output a single-pass header \`[MODE_ID | key=value]\` first, followed by 1-2 short, natural conversational Korean sentences (~해요, ~있어요, ~볼까요?, under 75 chars).`,
+      `⚠️ [CRITICAL ACCESSIBILITY & CONVERSATIONAL UX RULES (English-Core)]:`,
+      `1. **NO Screen-Reader Symbols**: Never output \`→\`, \`[\`, \`]\`, \`(\`, \`)\`, \`·\`, \`/\` or stage prefixes in the spoken Korean body.`,
+      `2. **Movement-Relative & Tactile Guidance Only**: Never use clock-face jargon ('12시 방향') or color-only path instructions ('밝은 색 보도'). Use movement-relative Korean ("지금 걸어가시는 방향 그대로", "오른쪽으로 살짝") and tactile cues (점자블록, 보도턱, 난간) with step counts.`,
+      `3. **Dead-End Collision Guard (LUM-49/50 vs LUM-79/89)**: In an indoor room, if a window, blind, desk, or wall blocks the front, NEVER tell the user to walk straight forward ("바로 앞은 창문이나 책상이라 막혀 있어요. 제자리에서 뒤로 돌아서서 방문 쪽을 비춰 보실래요?"). Inside a subway train (\`SUBWAY_ON_BOARD\`), standing in front of the train door window holding the handrail is safe and normal.`,
+      `4. **Elevator Exit Floor Priority (LUM-47)**: On elevator panels during an outing, check if the 1st/Lobby floor button is lit BEFORE open/close buttons.`,
+      `5. **Zero Hallucination & UnreadableReason**: If text/signage is unreadable, never guess or output 'None'. Emit \`unreadableReason=TOO_FAR|TOO_CLOSE_BLUR|OCCLUDED_BY_HAND|WRONG_SIDE|TILT_UP|GLARE\` and coach how to adjust.`,
     ];
 
     if (this.conversationHistory.length > 0) {
@@ -486,6 +575,7 @@ export class StatefulSkillHarness {
       vlmRes.spokenKorean,
       previousStickyMode,
     );
+    const mergedSlots = this.mergeAndCacheTemporalSlots(parsed.slots);
     this.stickyMode = parsed.mode;
     this.updateMissionProgressForMode(parsed.mode);
 
@@ -494,13 +584,17 @@ export class StatefulSkillHarness {
 
     if (matchedSkill?.executePostProcess) {
       try {
-        finalSpeech = await matchedSkill.executePostProcess({
+        const postProcessed = await matchedSkill.executePostProcess({
           mode: parsed.mode,
-          extractedSlots: parsed.slots,
+          extractedSlots: mergedSlots,
           draftSpokenKorean: parsed.draftSpeech,
           userQuery: params.userQuery,
           activeMission: this.activeMission,
         });
+        finalSpeech = mergeSafetyObservationWithLayer2(
+          postProcessed,
+          parsed.draftSpeech,
+        );
       } catch {
         finalSpeech = parsed.draftSpeech;
       }
@@ -520,7 +614,7 @@ export class StatefulSkillHarness {
       detectedModeLabelKo: matchedSkill?.labelKo ?? parsed.mode,
       previousStickyMode,
       activeCandidateSkills,
-      extractedSlots: parsed.slots,
+      extractedSlots: mergedSlots,
       activeMission: this.activeMission,
       priority: matchedSkill?.priority ?? "P2_COMPANION",
       earcon: matchedSkill?.earcon ?? "TARGET_FOUND",
