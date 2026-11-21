@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.DS_Store
+*.apk
+*.aab
+local.properties
+.gradle/
+build/
+.env
+.env.*
+!.env.example
+.devin/*.local.json
+feedback-logs/
