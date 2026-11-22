@@ -1,0 +1,17 @@
+{
+  "name": "lumo",
+  "version": "0.1.0",
+  "description": "Open-source AI Smart Glass companion for visually impaired users (Korea PoC & MVP)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types apps/companion-web/server.ts",
+    "simulate": "node --experimental-strip-types apps/scenario-simulator/run-day.ts",
+    "qa": "node --experimental-strip-types apps/scenario-simulator/qa-suite.ts",
+    "android:build": "JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\" ANDROID_HOME=\"$HOME/Library/Android/sdk\" \"$HOME/.gradle/wrapper/dists/gradle-8.7-bin/bhs2wmbdwecv87pi65oeuq5iu/gradle-8.7/bin/gradle\" -p apps/android-glass-poc assembleDebug",
+    "android:install": "node --experimental-strip-types apps/android-glass-poc/install-device.ts",
+    "android:emulator": "node --experimental-strip-types apps/android-glass-poc/install-device.ts --emulator",
+    "feedback:pull": "node --experimental-strip-types apps/android-glass-poc/pull-feedback.ts",
+    "test": "node --experimental-strip-types --test tests/lumo.test.ts"
+  }
+}

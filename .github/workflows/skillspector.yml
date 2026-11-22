@@ -1,0 +1,10 @@
+name: SkillSpector
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  skillspector:
+    uses: iceberg-1234/agent-workflows/.github/workflows/skillspector.yml@main

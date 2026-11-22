@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lumo — 실시간 카메라 & 추론 피드백 로거</title>
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --panel: #151a24;
+      --border: #2c3548;
+      --accent: #ffd400;
+      --green: #00e676;
+      --red: #ff5252;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Pretendard", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .camera-card {
+      background: var(--panel);
+      border: 2px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 18px;
+    }
+    .top-controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    video {
+      width: 100%;
+      height: 240px;
+      background: #000;
+      border-radius: 10px;
+      object-fit: cover;
+      border: 1px solid var(--border);
+    }
+    button {
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 800;
+      padding: 12px 18px;
+      border-radius: 10px;
+      border: 2px solid var(--border);
+      background: #1e2638;
+      color: var(--text);
+    }
+    button.toggle-off {
+      width: 100%;
+      background: #3b1219;
+      border-color: var(--red);
+      color: #ffd7d7;
+      font-size: 1.1rem;
+    }
+    button.toggle-on {
+      width: 100%;
+      background: var(--green);
+      border-color: var(--green);
+      color: #000;
+      font-size: 1.1rem;
+    }
+    .log-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .log-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .log-top {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .log-thumb {
+      width: 120px;
+      height: 90px;
+      border-radius: 8px;
+      object-fit: cover;
+      background: #000;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .log-meta {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .mode-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 800;
+      background: #1e293b;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      width: fit-content;
+    }
+    .time-text {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .speech-text {
+      font-size: 1.02rem;
+      font-weight: 700;
+      color: #fff;
+      margin-top: 2px;
+    }
+    .feedback-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .vote-btn {
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      border-radius: 8px;
+    }
+    .vote-btn.active-up {
+      background: var(--green);
+      border-color: var(--green);
+      color: #000;
+    }
+    .vote-btn.active-down {
+      background: var(--red);
+      border-color: var(--red);
+      color: #fff;
+    }
+    .feedback-input {
+      flex: 1;
+      min-width: 180px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0b0e14;
+      color: var(--text);
+      font-size: 0.92rem;
+    }
+    .save-btn {
+      padding: 9px 14px;
+      font-size: 0.9rem;
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #000;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 1. Multi-Use-Case Verification Studio Tabs + Quick Scenario Chips + Live Camera -->
+    <div class="camera-card">
+      <div id="ucCategoryTabs" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:6px;">
+        <button class="uc-tab-btn" data-cat="AUTO" style="background:#ffd400;color:#000;padding:7px 12px;font-size:0.82rem;white-space:nowrap;">🌟 전체자동</button>
+        <button class="uc-tab-btn" data-cat="WAYFINDING" style="background:#1e293b;color:#fff;padding:7px 12px;font-size:0.82rem;white-space:nowrap;">🧭 보행·길찾기</button>
+        <button class="uc-tab-btn" data-cat="TRANSIT_TAXI" style="background:#1e293b;color:#fff;padding:7px 12px;font-size:0.82rem;white-space:nowrap;">🚇 대중교통·택시</button>
+        <button class="uc-tab-btn" data-cat="SHOPPING_DINING_DOC" style="background:#1e293b;color:#fff;padding:7px 12px;font-size:0.82rem;white-space:nowrap;">🛒 마트·식사·문서</button>
+        <button class="uc-tab-btn" data-cat="HOME_APPLIANCE_KIOSK" style="background:#1e293b;color:#fff;padding:7px 12px;font-size:0.82rem;white-space:nowrap;">🏠 생활·가전·키오스크</button>
+        <button class="uc-tab-btn" data-cat="PUBLIC_OFFICE" style="background:#1e293b;color:#fff;padding:7px 12px;font-size:0.82rem;white-space:nowrap;">🚻 공공시설·오피스</button>
+      </div>
+      <div id="ucQuickChips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;">
+        <button class="uc-chip" data-q="지금 보이는 상품의 제품명, 맛, 제로슈거 여부, 가격, 1+1 행사 여부를 알려줘" style="background:#0f172a;color:#38bdf8;padding:6px 10px;font-size:0.8rem;white-space:nowrap;">🥤 마트 1+1/제로</button>
+        <button class="uc-chip" data-q="접시나 식판 위 음식과 반찬 배치, 생선 가시나 남은 양을 알려줘" style="background:#0f172a;color:#38bdf8;padding:6px 10px;font-size:0.8rem;white-space:nowrap;">🍱 식탁 반찬/가시</button>
+        <button class="uc-chip" data-q="약봉지 복용 시점/안약 구분 또는 식품 소비기한 D-Day를 알려줘" style="background:#0f172a;color:#38bdf8;padding:6px 10px;font-size:0.8rem;white-space:nowrap;">💊 약봉지/소비기한</button>
+        <button class="uc-chip" data-q="인덕션 화구 켜짐 단계와 잔열(H) 화상 위험, 또는 가전 남은 시간을 알려줘" style="background:#0f172a;color:#38bdf8;padding:6px 10px;font-size:0.8rem;white-space:nowrap;">🔥 인덕션 잔열/가전</button>
+        <button class="uc-chip" data-q="지금 화면에 보이는 생활 물건(에어팟, 안경, 열쇠 등) 위치를 기억해 줘" style="background:#0f172a;color:#38bdf8;padding:6px 10px;font-size:0.8rem;white-space:nowrap;">📌 물건 위치 기억</button>
+        <button class="uc-chip" data-q="앞에 멈춘 택시/장콜의 색상, 차종, 번호판과 뒷좌석 문 손잡이 위치를 알려줘" style="background:#0f172a;color:#38bdf8;padding:6px 10px;font-size:0.8rem;white-space:nowrap;">🚕 호출택시 번호판</button>
+        <button class="uc-chip" data-q="화장실 입구 남녀 픽토그램 구분과 빈 칸, 세면대 위치를 알려줘" style="background:#0f172a;color:#38bdf8;padding:6px 10px;font-size:0.8rem;white-space:nowrap;">🚻 화장실/빈칸</button>
+        <button class="uc-chip" data-q="상대방이 명함/악수로 손을 내밀고 있는지 또는 회의 화면 핵심을 요약해 줘" style="background:#0f172a;color:#38bdf8;padding:6px 10px;font-size:0.8rem;white-space:nowrap;">🤝 명함/회의화면</button>
+      </div>
+      <div class="feedback-row" style="margin-bottom:10px;">
+        <input id="missionInput" class="feedback-input" type="text" placeholder="💬 명령/질문 또는 목적지 입력 (예: 쿠팡 본사 / 내 에어팟 어디 있어?)" value="" />
+        <button id="setMissionBtn" class="save-btn">🔍 목적지검색</button>
+      </div>
+      <div id="candidateConfirmBox" style="display:none;background:#1e293b;padding:12px;border-radius:10px;margin-bottom:10px;"></div>
+      <div id="activeNavBanner" style="display:none;background:#0b0e14;color:#00e676;font-weight:800;padding:10px 12px;border-radius:8px;margin-bottom:10px;font-size:0.9rem;"></div>
+      <div class="top-controls">
+        <button id="aiToggleBtn" class="toggle-off" aria-pressed="false">
+          🔴 AI 답변: OFF (터치하여 ON)
+        </button>
+      </div>
+      <video id="cameraPreview" autoplay playsinline muted></video>
+      <canvas id="captureCanvas" style="display:none;"></canvas>
+    </div>
+
+    <!-- 2. Inference & Feedback Logs -->
+    <div id="logList" class="log-list"></div>
+  </div>
+
+  <script>
+    let cameraStream = null;
+    let aiEnabled = false;
+    let loopTimer = null;
+    let inFlight = false;
+
+    const videoEl = document.getElementById("cameraPreview");
+    const canvasEl = document.getElementById("captureCanvas");
+    const toggleBtn = document.getElementById("aiToggleBtn");
+    const logListEl = document.getElementById("logList");
+
+    async function ensureCamera() {
+      if (cameraStream) return;
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+          audio: false,
+        });
+        videoEl.srcObject = cameraStream;
+      } catch {}
+    }
+
+    function captureBase64Frame() {
+      if (cameraStream && videoEl.videoWidth > 0) {
+        canvasEl.width = 480;
+        canvasEl.height = Math.round((videoEl.videoHeight / videoEl.videoWidth) * 480) || 360;
+        const ctx = canvasEl.getContext("2d");
+        ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+        return canvasEl.toDataURL("image/jpeg", 0.7).split(",")[1];
+      }
+      return undefined;
+    }
+
+    function speakText(text) {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "ko-KR";
+        u.rate = 1.12;
+        window.speechSynthesis.speak(u);
+      }
+    }
+
+    async function runInferenceStep() {
+      if (!aiEnabled || inFlight) return;
+      inFlight = true;
+      try {
+        const imageBase64 = captureBase64Frame();
+        const res = await fetch("/api/vision/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "AUTO", imageBase64 }),
+        });
+        const data = await res.json();
+        if (aiEnabled && data.spokenKorean) {
+          speakText(data.spokenKorean);
+        }
+        await loadLogs();
+      } catch {} finally {
+        inFlight = false;
+      }
+    }
+
+    document.getElementById("setMissionBtn").addEventListener("click", async () => {
+      const query = document.getElementById("missionInput").value.trim();
+      const box = document.getElementById("candidateConfirmBox");
+      const navBanner = document.getElementById("activeNavBanner");
+      if (!query) {
+        box.style.display = "none";
+        navBanner.style.display = "none";
+        await fetch("/api/mission/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ goalText: "" }),
+        });
+        return;
+      }
+
+      box.style.display = "block";
+      box.innerHTML = `<div style="color:#ffd400;font-weight:700;">⏳ 현재 GPS 출발지 확인 및 '${query}' 주변 목적지 후보 검색 중...</div>`;
+
+      const res = await fetch("/api/nav/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      const data = await res.json();
+      speakText(data.confirmationPromptKo);
+
+      function renderCandidates(sortMode) {
+        const list = sortMode === "DISTANCE" ? data.candidatesByDistance : data.candidatesByRecommended;
+        box.innerHTML = `
+          <div style="color:#ffd400;font-weight:800;margin-bottom:8px;">
+            📍 출발지 확인: ${data.originAddressKo}<br/>어느 목적지로 안내할까요? (추천순 / 거리순 선택)
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:10px;">
+            <button id="tabRecBtn" style="flex:1;padding:8px;background:${sortMode === "RECOMMENDED" ? "#ffd400" : "#334155"};color:${sortMode === "RECOMMENDED" ? "#000" : "#fff"};">⭐ 추천순 (보행최적)</button>
+            <button id="tabDistBtn" style="flex:1;padding:8px;background:${sortMode === "DISTANCE" ? "#ffd400" : "#334155"};color:${sortMode === "DISTANCE" ? "#000" : "#fff"};">📏 거리순 (최단거리)</button>
+          </div>
+        `;
+        box.querySelector("#tabRecBtn").addEventListener("click", () => renderCandidates("RECOMMENDED"));
+        box.querySelector("#tabDistBtn").addEventListener("click", () => renderCandidates("DISTANCE"));
+
+        (list || []).forEach((cand, idx) => {
+          const btn = document.createElement("button");
+          btn.className = "save-btn";
+          btn.style.display = "block";
+          btn.style.width = "100%";
+          btn.style.marginBottom = "6px";
+          btn.style.background = "#00e676";
+          btn.textContent = `🚇 ${idx + 1}번: ${cand.spokenPlaceWithAddrKo || cand.shortAddressKo} (대중교통 약 ${cand.estimatedTransitMinutes}분 · 도보 ${cand.estimatedWalkMinutes}분)`;
+          btn.addEventListener("click", async () => {
+            box.innerHTML = `<div style="color:#ffd400;font-weight:700;">⏳ '${cand.name}'까지 전체 이동 계획(도보·대중교통·환승)을 설계하고 있어요...</div>`;
+            const confRes = await fetch("/api/nav/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                originAddressKo: data.originAddressKo,
+                originLat: 37.5006,
+                originLng: 127.0364,
+                destination: cand,
+              }),
+            });
+            const confData = await confRes.json();
+            const milestonesHtml = (confData.route.macroMilestones || [])
+              .map((m) => `<div style="color:#00e676;font-size:0.9rem;margin:3px 0;">• ${m}</div>`)
+              .join("");
+
+            box.innerHTML = `
+              <div style="color:#ffd400;font-weight:800;margin-bottom:6px;">
+                🗺️ 전체 이동 계획 확인 (${data.originAddressKo} → ${cand.name})
+              </div>
+              <div style="color:#fff;font-size:0.95rem;margin-bottom:8px;">
+                ${confData.route.macroPlanOverviewKo}
+              </div>
+              ${milestonesHtml}
+              <button id="confirmMacroStartBtn" class="save-btn" style="width:100%;margin-top:10px;background:#00e676;font-size:1rem;">
+                🚀 네, 이 계획으로 출발 확정! (실시간 동행 시작)
+              </button>
+            `;
+            speakText(confData.route.macroPlanOverviewKo);
+
+            box.querySelector("#confirmMacroStartBtn").addEventListener("click", () => {
+              box.style.display = "none";
+              navBanner.style.display = "block";
+              const firstStep = confData.route.turnSteps[0]?.instructionKo || "";
+              navBanner.textContent = `🧭 TMAP 내비 활성: [${data.originAddressKo} → ${cand.name}] | 전체 계획: ${(confData.route.macroMilestones || []).join(" → ")} | 현재: ${firstStep}`;
+              speakText(confData.openingGuidanceKo);
+            });
+          });
+          box.appendChild(btn);
+        });
+      }
+
+      renderCandidates("RECOMMENDED");
+    });
+
+    toggleBtn.addEventListener("click", async () => {
+      aiEnabled = !aiEnabled;
+      toggleBtn.setAttribute("aria-pressed", String(aiEnabled));
+      if (aiEnabled) {
+        toggleBtn.className = "toggle-on";
+        toggleBtn.textContent = "🟢 AI 답변: ON (터치하여 OFF)";
+        await ensureCamera();
+        await runInferenceStep();
+        loopTimer = setInterval(() => {
+          const speaking = "speechSynthesis" in window && window.speechSynthesis.speaking;
+          if (aiEnabled && !speaking && !inFlight) {
+            runInferenceStep();
+          }
+        }, 4000);
+      } else {
+        toggleBtn.className = "toggle-off";
+        toggleBtn.textContent = "🔴 AI 답변: OFF (터치하여 ON)";
+        if (loopTimer) {
+          clearInterval(loopTimer);
+          loopTimer = null;
+        }
+        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      }
+    });
+
+    async function saveFeedback(id, vote, feedbackText) {
+      await fetch("/api/feedback/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, vote, feedbackText }),
+      });
+      await loadLogs();
+    }
+
+    function renderLogCard(item) {
+      const card = document.createElement("div");
+      card.className = "log-card";
+      const timeStr = new Date(item.timestampIso).toLocaleTimeString("ko-KR", { hour12: false });
+      const imgSrc = item.imageBase64
+        ? `data:image/jpeg;base64,${item.imageBase64}`
+        : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='90'><rect width='100%' height='100%' fill='%23000'/><text x='50%' y='50%' fill='%23666' font-size='12' text-anchor='middle'>No Frame</text></svg>";
+
+      const ticketBadge = item.linearIssueId
+        ? `<span class="mode-badge" style="border-color:#00e676;color:#00e676;">🎫 처리됨: ${item.linearIssueId}</span>`
+        : "";
+
+      card.innerHTML = `
+        <div class="log-top">
+          <img class="log-thumb" src="${imgSrc}" alt="추론 시점 카메라 영상" />
+          <div class="log-meta">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <span class="mode-badge">🤖 추론 상황: [${item.detectedMode}] ${item.detectedModeLabelKo}</span>
+              ${ticketBadge}
+            </div>
+            <span class="time-text">🕒 ${timeStr} · ⏱️ ${item.latencyMs}ms · 📱 ${item.deviceSource}</span>
+            <div class="speech-text">"${item.spokenKorean}"</div>
+          </div>
+        </div>
+        <div class="feedback-row">
+          <button class="vote-btn ${item.vote === "UP" ? "active-up" : ""}" data-vote="UP">👍 추천</button>
+          <button class="vote-btn ${item.vote === "DOWN" ? "active-down" : ""}" data-vote="DOWN">👎 비추천</button>
+          <input class="feedback-input" type="text" placeholder="이 추론에 대한 상세 피드백 입력 (예: 상황 분류 오류, 거리 오차 등)" value="${(item.feedbackText || "").replace(/"/g, "&quot;")}" />
+          <button class="save-btn">저장</button>
+        </div>
+      `;
+
+      const upBtn = card.querySelector('[data-vote="UP"]');
+      const downBtn = card.querySelector('[data-vote="DOWN"]');
+      const inputEl = card.querySelector(".feedback-input");
+      const saveBtn = card.querySelector(".save-btn");
+
+      upBtn.addEventListener("click", () => {
+        const nextVote = item.vote === "UP" ? "NONE" : "UP";
+        saveFeedback(item.id, nextVote, inputEl.value);
+      });
+      downBtn.addEventListener("click", () => {
+        const nextVote = item.vote === "DOWN" ? "NONE" : "DOWN";
+        saveFeedback(item.id, nextVote, inputEl.value);
+      });
+      saveBtn.addEventListener("click", () => {
+        saveFeedback(item.id, item.vote, inputEl.value);
+      });
+
+      return card;
+    }
+
+    async function loadLogs() {
+      try {
+        const res = await fetch("/api/feedback/logs");
+        const data = await res.json();
+        logListEl.innerHTML = "";
+        (data.logs || []).forEach((item) => {
+          logListEl.appendChild(renderLogCard(item));
+        });
+      } catch {}
+    }
+
+    ensureCamera();
+    loadLogs();
+  </script>
+</body>
+</html>
