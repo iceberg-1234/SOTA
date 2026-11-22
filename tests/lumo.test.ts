@@ -622,7 +622,7 @@ test("Companion Web Server HTTP API endpoints respond accurately", async () => {
     const htmlRes = await fetch(`${baseUrl}/`);
     assert.equal(htmlRes.status, 200);
     const html = await htmlRes.text();
-    assert.match(html, /AI 답변: OFF/);
+    assert.match(html, /Live AI: OFF|AI 답변: OFF/);
 
     const syncRes = await fetch(`${baseUrl}/api/feedback/sync`, {
       method: "POST",

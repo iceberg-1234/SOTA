@@ -164,11 +164,23 @@ export interface SkillObservation {
   activeMission?: ActiveMissionState | null;
 }
 
+export interface SkillExpertPlaybook {
+  /** 1->2->3 visual inspection sequence in the camera frame */
+  visualScanChecklist: readonly string[];
+  /** Exact information hierarchy that delivers real independent-living value (no generic captioning) */
+  realLifeValueFormula: string;
+  /** Critical look-alike hazards and negative constraints */
+  confounderAndSafetyGuards: readonly string[];
+  /** Object/environment-specific physical camera or hand aiming coaching */
+  physicalAimingGuide: string;
+}
+
 export interface LumoSkillPlugin {
   id: AutoDetectedSceneMode;
   labelKo: string;
   triggerDescriptionKo: string;
   extractionRulesKo: string;
+  expertPlaybook?: SkillExpertPlaybook;
   relatedSkillIds: readonly AutoDetectedSceneMode[];
   priority: SpeechPriority;
   earcon: EarconType;
@@ -219,12 +231,28 @@ export function isValidObservedSlot(val?: string | null): boolean {
  * a refrigerator, orange juice bottle, medicine, dining plate, induction stove, or desk,
  * Lumo routes it to the exact domain Micro-Skill instead of treating indoor objects as walking hazards!
  */
+export function isFullReadRequest(userQuery?: string): boolean {
+  const q = (userQuery ?? "").trim();
+  if (!q) return false;
+  return /전체|전부|다\s*읽어|끝까지|전문|빠짐없이|자세히|그대로\s*읽어|내용\s*다|전체를/.test(q);
+}
+
 export function inferOrCorrectSceneModeFromContent(
   taggedMode: AutoDetectedSceneMode,
   text: string,
   slots: Record<string, string>,
 ): AutoDetectedSceneMode {
   if (taggedMode === "NAV_CONTROL" || slots.navAction) return "NAV_CONTROL";
+
+  // LUM-143 & LUM-147: Handheld cards, access cards, books, supplements, or bottles must route to SMART_READER!
+  if (
+    /손에\s*(?:쥐고|들고)|출입카드|카드|출입증|신분증|유의사항|생활지원센터|관리사무소|책을\s*들고/.test(
+      text,
+    ) &&
+    (taggedMode === "WALKING_SAFETY" || taggedMode === "RESTROOM_AND_SEAT")
+  ) {
+    return "SMART_READER";
+  }
 
   // If the model explicitly tagged a specialized non-walking mode, respect it
   if (taggedMode !== "WALKING_SAFETY") {
@@ -320,7 +348,7 @@ export function parseStructuredHarnessOutput(
     const rawMode = headerMatch[1] as AutoDetectedSceneMode;
     const rawSlots = headerMatch[2]?.trim();
     if (rawSlots) {
-      for (const pair of rawSlots.split(",")) {
+      for (const pair of rawSlots.split(/[,|]/)) {
         const [k, ...rest] = pair.split("=");
         if (k && rest.length > 0) {
           const v = rest.join("=").trim();
@@ -560,8 +588,18 @@ export class StatefulSkillHarness {
 
     for (const skill of this.skills.values()) {
       if (activeIds.has(skill.id)) {
+        const pb = skill.expertPlaybook;
+        const pbText = pb
+          ? [
+              `  - Extraction Header: ${skill.extractionRulesKo}`,
+              `  - Visual Scan Order: ${pb.visualScanChecklist.join(" -> ")}`,
+              `  - Real-Life Value Formula: ${pb.realLifeValueFormula}`,
+              `  - Safety & Confounder Guards: ${pb.confounderAndSafetyGuards.join(" | ")}`,
+              `  - Physical Aiming Guide: ${pb.physicalAimingGuide}`,
+            ].join("\n")
+          : `  - 세부 규칙: ${skill.extractionRulesKo}`;
         activeBlocks.push(
-          `• [${skill.id}] (${skill.labelKo}): ${skill.triggerDescriptionKo}\n  - 세부 규칙: ${skill.extractionRulesKo}`,
+          `• [${skill.id}] (${skill.labelKo}): ${skill.triggerDescriptionKo}\n${pbText}`,
         );
       } else {
         fallbackTriggers.push(
@@ -570,10 +608,13 @@ export class StatefulSkillHarness {
       }
     }
 
+    const wantFullRead = isFullReadRequest(userQuery);
     const lines = [
       `[Layer 1: Context-Gated Micro-Skill Router | Sticky Mode: ${this.stickyMode} | Target Output Locale: ko-KR]`,
       `You are 'Lumo', a warm, conversational AI smart-glass companion walking alongside a visually impaired user in Korea (Gemini Live / Pickle style).`,
-      `Output a single-pass header \`[MODE_ID | key=value]\` first, followed by 1-2 short, natural conversational Korean sentences (~해요, ~있어요, ~볼까요?, under 75 chars).`,
+      wantFullRead
+        ? `📖 [FULL VERBATIM READING MODE (LUM-147)]: The user explicitly requested reading ALL text completely! Override any 1-2 sentence brevity rule: output \`[SMART_READER | docType=전문낭독]\` first, then read EVERY visible line, bullet item, caution, and phone/card number from top to bottom without summarizing or skipping anything!`
+        : `Output a single-pass header \`[MODE_ID | key=value]\` first, followed by 1-2 short, natural conversational Korean sentences (~해요, ~있어요, ~볼까요?, under 75 chars).`,
       `⚠️ [CRITICAL ACCESSIBILITY & CONVERSATIONAL UX RULES (English-Core)]:`,
       `1. **NO Screen-Reader Symbols**: Never output \`→\`, \`[\`, \`]\`, \`(\`, \`)\`, \`·\`, \`/\` or stage prefixes in the spoken Korean body.`,
       `2. **Movement-Relative & Tactile Guidance Only**: Never use clock-face jargon ('12시 방향') or color-only path instructions ('밝은 색 보도'). Use movement-relative Korean ("지금 걸어가시는 방향 그대로", "오른쪽으로 살짝") and tactile cues (점자블록, 보도턱, 난간) with step counts.`,
@@ -658,6 +699,7 @@ export class StatefulSkillHarness {
       userPrompt: dynamicPrompt,
       imageBase64: params.imageBase64,
       imageMimeType: params.imageMimeType ?? "image/jpeg",
+      maxOutputTokens: isFullReadRequest(params.userQuery) ? 650 : 160,
     });
 
     const parsed = parseStructuredHarnessOutput(

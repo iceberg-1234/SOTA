@@ -23,3 +23,14 @@
   - `LUMO_SEOUL_SUBWAY_API_KEY` (Seoul Open Data Plaza `swopenAPI.seoul.go.kr` realtime subway arrival)
   - `LUMO_SEOUL_BUS_API_KEY` (Seoul/Metropolitan Bus `ws.bus.go.kr` / data.go.kr)
   - `LUMO_TMAP_API_KEY` (SKT TMAP POI, Pedestrian & Public Transit Routing)
+
+## Local-First Iteration & Pull Request Rules (MANDATORY)
+- **Local-First Workflow (No Auto-PR per feature)**:
+  - Do NOT automatically `git push` or open a GitHub Pull Request after every individual feature or bugfix.
+  - Develop, iterate, and test locally first (`npm run qa`, `npm test`, `npm run android:build`, `npm run android:install` on the connected device).
+  - Only create a commit/branch/PR when the user explicitly requests to push or open a PR after local verification.
+- **Pre-PR Verification Checklist (`npm run pre-pr` — MUST run before every PR)**:
+  1. **Zero Secret & Internal File Leakage**: Ensure `ONE_PAGER.md`, `PRD.md`, `feedback-logs/`, `packages/core/linear-backlog.ts`, `apps/android-glass-poc/triage-feedback.ts`, `.devin/mcp_config.json`, `.devin/skills/feedback-triage/`, and any API keys or `LINEAR` references are NEVER tracked in Git.
+  2. **Universal Skill Contract (`/lumo-skill-architect`)**: Every skill must use `English-Core + Target-Locale Output`, have zero hardcoded station/door/stop fallback IDs, handle `unreadableReason` view-finding coaching, and defend against confounders.
+  3. **SkillSpector Security Scan**: If any `.devin/skills/*` file was added or modified, run `skillspector scan <skill-dir> --no-llm` and report the score (`0/100 LOW`) in the PR body.
+  4. **QA & Test Gate**: `npm run pre-pr` (`npm run qa` + `npm test` + repository hygiene check) and `npm run android:build` must pass with 0 errors.

@@ -1,46 +1,38 @@
 ---
 name: lumo-skill-architect
-description: Design, generate, and audit general-purpose, zero-hardcoding Lumo Micro-Skills for visually impaired smart-glass use cases using English-Core instructions, Temporal Slot Memory, and Physics-Aware View-Finding.
+description: Design, generate, and audit general-purpose, zero-hardcoding Lumo Micro-Skills for visually impaired smart-glass use cases using 2-Tier Expert Playbooks, English-Core instructions, Temporal Slot Memory, and Physics-Aware View-Finding.
 ---
 
 # Lumo Universal Skill Architect Skill
 
-Use this skill whenever creating a new Use Case skill or auditing/refactoring existing skills in Lumo. Every skill MUST be general-purpose (usable by any person in any city/station/store without hardcoded dummy values) and follow the **English-Core + Target-Locale Output** architecture.
+Use this skill whenever creating a new Use Case skill or auditing/refactoring existing skills in Lumo. Every skill MUST be general-purpose (usable by any person in any city/station/store without hardcoded dummy values) and follow the **2-Tier Expert Playbook + English-Core (`E2K`)** architecture.
 
-## 1. Open-Source Architectural Foundations
+## 1. Open-Source & Rehabilitation Foundations
 
-Every Lumo Micro-Skill synthesizes proven patterns from leading open-source multimodal & wearable AI systems:
+Every Lumo Micro-Skill synthesizes proven patterns from leading open-source multimodal AI systems and Orientation & Mobility (O&M) / Independent Living Skills (ILS) rehabilitation standards:
 
-1. **Capability Surface & Latency Class Separation (inspired by `BasedHardware/omi`)**:
-   - Declare the physical `surface` (`OUTDOOR_WALK`, `TRANSIT`, `INDOOR_DAILY`, `ANY`) so the **Context Gate** masks out mutually exclusive skills (never loading kitchen stove rules on a subway train, or keeping <= 4 active micro-skills per prompt).
-   - Separate **Layer 1 Perception (Single-Pass VLM slot extraction)** from **Layer 2 Deterministic Execution (API lookup, date/distance math, state transitions)**.
-2. **Small Task Handoff & Turn-Level Scenario Grading (inspired by `livekit/agents` & `livekit/agent-skills`)**:
-   - Keep each Micro-Skill focused on a single visual/situational job (1 Use Case = 1 Micro-Skill).
-   - Pair every skill with positive and negative (confounder/unreadable) assertions in the automated QA suite.
-3. **Zero-Hardcoding & Structured Failure Reason Contract (inspired by `OpenInterpreter/01` & MCP Tool Spec)**:
-   - **NEVER hardcode fallback entities** (such as a specific station name, screen door `"5-3"`, bus stop `"22-001"`, or brand name) inside a skill's execution handler. All target entities must come from observed slots, the 15-second `TemporalSlotCache`, or the active `MissionContext` / `LocalePack`.
+1. **2-Tier Routing vs. Deep Domain Playbook (inspired by `BasedHardware/omi` & `livekit/agents`)**:
+   - **Tier 1 (Lightweight Router Trigger — 1 line)**: Shown in the Global Scene Switch Directory when inactive (~10 tokens/skill) so Lumo can switch to any of the 16+ skills in a single frame without prompt bloat.
+   - **Tier 2 (`expertPlaybook` — injected ONLY when active)**: Provides deep O&M / ILS domain expertise (`visualScanChecklist`, `realLifeValueFormula`, `confounderAndSafetyGuards`, `physicalAimingGuide`) so the VLM delivers genuine daily-living value rather than shallow image captioning.
+2. **Zero-Hardcoding & Structured Failure Reason Contract (inspired by `OpenInterpreter/01` & MCP Tool Spec)**:
+   - NEVER hardcode fallback entities (such as a specific station name, screen door `"5-3"`, or bus stop `"22-001"`). All target entities must come from observed slots, the 15-second `TemporalSlotCache`, or the active `MissionContext` / `LocalePack`.
 
-## 2. The 5-Point Universal Skill Contract (Checklist)
+## 2. The 6-Point Universal Skill Contract (Checklist)
 
-Before a skill is registered, verify all 5 requirements:
+Before registering or modifying a skill, verify all 6 requirements:
 
-1. **English-Core Prompt & Schema + Target-Locale Spoken Output (`E2K` Pattern)**:
-   - Write `triggerDescription` and `extractionRules` in concise **English** (with bilingual local visual anchors where helpful, e.g., `tactile paving (점자블록)`, `screen door code (스크린도어 번호)`).
-   - Keep extracted text values in their observed script and produce the final spoken output in the user's target locale (`ko-KR`).
-2. **Zero Hardcoded Fallbacks**:
-   - If a required slot (`door`, `nextStation`, `arsId`, `expiryDate`, `taxiPlate`) is missing after checking both the current frame and the 15-second `TemporalSlotCache`, do NOT substitute a dummy constant. Trigger **Physics-Aware Active View-Finding** instead.
-3. **Physics-Aware Active View-Finding (`unreadableReason` Slot)**:
-   - Instruct the VLM to emit `unreadableReason` when a target cannot be read clearly, and map each reason to a physical action the blind user can perform:
-     - `TOO_FAR`: Walk 2-3 steps closer toward the sign/target.
-     - `TOO_CLOSE_BLUR`: Hold the item about one hand-span (20-30cm) away from the camera.
-     - `OCCLUDED_BY_HAND`: Shift fingers slightly down or to the edge of the package.
-     - `WRONG_SIDE`: Slowly rotate or flip the container half a turn to expose the label.
-     - `TILT_UP` / `TILT_DOWN`: Tilt the head/camera slightly up or down.
-     - `GLARE`: Angle the object or head slightly to reduce reflection.
-4. **Confounder Defense (Negative Constraints)**:
-   - Explicitly distinguish look-alike hazards in the skill rules:
-     - `MANUFACTURED_DATE` (`제조일자`) vs `EXPIRY_DATE` (`소비기한/유통기한`).
-     - Indoor room window (`INDOOR_SPACE`) vs subway train door window (`SUBWAY_ON_BOARD`).
-     - Waiting on platform (`SUBWAY_PLATFORM`) vs actually open train doors.
+1. **4-Part `expertPlaybook` Completeness**:
+   - `visualScanChecklist`: Step-by-step order of visual details to inspect (e.g., container type -> seal/remaining amount -> cap/side expiration stamp).
+   - `realLifeValueFormula`: Actionable information hierarchy for blind independence (e.g., obstacle avoidance + shoreline re-alignment; food name + open/remaining state + expiry D-Day; dining layout + utensils/water cup + bone hazard).
+   - `confounderAndSafetyGuards`: Critical look-alike hazards (e.g., eyedrops vs glue/topical ointment; `MANUFACTURED` vs `EXPIRY` date; indoor room window vs subway train door window; wait vs safe-to-cross remaining seconds).
+   - `physicalAimingGuide`: Shape-specific camera/hand adjustment when details are out of view (e.g., rotate bottle neck half a turn, touch bottom-right screen bezel first).
+2. **English-Core Prompt & Schema + Target-Locale Spoken Output (`E2K` Pattern)**:
+   - Write rules and playbooks in concise **English** with bilingual local visual anchors (`tactile paving (점자블록)`), and output final speech in natural conversational Korean (`ko-KR`).
+3. **Zero Hardcoded Fallbacks**:
+   - Never substitute dummy IDs when a slot is missing; check `TemporalSlotCache` (15s) or trigger view-finding coaching.
+4. **Physics-Aware Active View-Finding (`unreadableReason` Slot)**:
+   - Support `TOO_FAR`, `TOO_CLOSE_BLUR`, `OCCLUDED_BY_HAND`, `WRONG_SIDE`, `TILT_UP`, `TILT_DOWN`, `GLARE`.
 5. **Safety-Preserving Output Merge**:
-   - When Layer 2 generates a deterministic calculation (e.g., D-Day count, transfer door steps, bus arrival time), preserve any immediate obstacle or crowd warning detected in `draftSpokenKorean`.
+   - Preserve immediate obstacle or crowd warnings from `draftSpokenKorean` alongside Layer 2 calculations.
+6. **Turn-Level QA Regression Coverage**:
+   - Register positive, confounder, and unreadable assertions in `apps/scenario-simulator/qa-suite.ts`.

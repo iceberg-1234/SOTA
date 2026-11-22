@@ -33,7 +33,10 @@ import android.speech.tts.UtteranceProgressListener
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Base64
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
@@ -61,6 +64,16 @@ import java.util.concurrent.Executors
 class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListener {
     private var tts: TextToSpeech? = null
     private lateinit var missionInput: EditText
+    private lateinit var glassModeTabBtn: Button
+    private lateinit var labModeTabBtn: Button
+    private lateinit var glassSimulatorPanel: LinearLayout
+    private lateinit var labControlsContainer: LinearLayout
+    private lateinit var glassHudModeBadge: TextView
+    private lateinit var glassHudSpeechTv: TextView
+    private lateinit var glassTouchpadStatusTv: TextView
+    private lateinit var categoryScroll: HorizontalScrollView
+    private lateinit var chipScroll: HorizontalScrollView
+    private lateinit var searchRow: LinearLayout
     private lateinit var categoryTabRow: LinearLayout
     private lateinit var quickChipRow: LinearLayout
     private lateinit var candidateConfirmBox: LinearLayout
@@ -71,6 +84,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
     private lateinit var historyScrollView: ScrollView
     private lateinit var historyContainer: LinearLayout
 
+    private var isGlassWearableMode: Boolean = true
+    private var isRecordingVoiceFeedback: Boolean = false
+    private var latestEntryId: String? = null
+    private var candidateSwipeCursor: Int = 0
+    private var lastVolDownPressMs: Long = 0L
     private var activeCategoryId: String = "AUTO"
 
     private data class UseCaseQuickChip(val label: String, val promptQuery: String)
@@ -84,69 +102,69 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
     private val useCaseCategories = listOf(
         UseCaseCategoryTab(
             id = "AUTO",
-            title = "🌟 전체자동",
-            inputHint = "💬 무엇이든 물어보거나 목적지를 입력하세요 (예: 구의역 가자 / 앞에 뭐 있어?)",
+            title = "🌟 Auto All",
+            inputHint = "💬 Ask anything or enter destination (e.g. Guui Stn / Read all)",
             chips = listOf(
-                UseCaseQuickChip("👀 지금 내 앞 상황 설명", "지금 내 눈앞에 무엇이 보이는지 자연스럽게 알려줘"),
-                UseCaseQuickChip("🥤 마트 1+1/제로 확인", "지금 보이는 상품의 정확한 이름, 맛, 제로슈거 여부, 가격, 1+1 행사 여부를 알려줘"),
-                UseCaseQuickChip("🍱 식탁 반찬/가시 브리핑", "식탁이나 접시 위 음식과 반찬이 앞쪽/위쪽 어디에 놓여 있는지, 생선 가시나 남은 양을 알려줘"),
-                UseCaseQuickChip("🔥 인덕션 잔열/가전 확인", "인덕션 화구 켜짐 단계와 잔열(H) 화상 위험 여부, 또는 가전제품 표시창 상태와 남은 시간을 알려줘"),
-                UseCaseQuickChip("📌 눈앞 물건 위치 기억", "지금 화면에 보이는 생활 물건(에어팟, 안경, 열쇠, 지갑 등)과 구체적 위치를 기억해 줘")
+                UseCaseQuickChip("👀 Describe Scene", "지금 내 눈앞에 무엇이 보이는지 자연스럽게 알려줘"),
+                UseCaseQuickChip("🥤 Mart 1+1 / Zero", "지금 보이는 상품의 정확한 이름, 맛, 제로슈거 여부, 가격, 1+1 행사 여부를 알려줘"),
+                UseCaseQuickChip("🍱 Dining & Bones", "식탁이나 접시 위 음식과 반찬이 앞쪽/위쪽 어디에 놓여 있는지, 생선 가시나 남은 양을 알려줘"),
+                UseCaseQuickChip("🔥 Stove Heat / LED", "인덕션 화구 켜짐 단계와 잔열(H) 화상 위험 여부, 또는 가전제품 표시창 상태와 남은 시간을 알려줘"),
+                UseCaseQuickChip("📌 Remember Item", "지금 화면에 보이는 생활 물건(에어팟, 안경, 열쇠, 지갑 등)과 구체적 위치를 기억해 줘")
             )
         ),
         UseCaseCategoryTab(
             id = "WAYFINDING",
-            title = "🧭 보행·길찾기",
-            inputHint = "🧭 목적지 검색 또는 경로 변경 (예: 쿠팡 본사 / 구의역 / 지하철로)",
+            title = "🧭 Wayfinding",
+            inputHint = "🧭 Search place or switch mode (e.g. Coupang HQ / By Subway)",
             chips = listOf(
-                UseCaseQuickChip("⚠️ 무표시 계단/단차/투명유리문", "전방에 회색 내리막 계단 첫 단, 보도턱 단차, 또는 투명 통유리문과 손잡이가 있는지 봐줘"),
-                UseCaseQuickChip("🚦 횡단보도/역광 신호등", "횡단보도 보행자 신호등이 초록불인지 빨간불인지, 남은 시간과 정면 방향을 알려줘"),
-                UseCaseQuickChip("🌙 어두운 구간 바닥/난간", "어두운 구간인데 지금 걸어가는 바닥이 평탄한지, 손잡이나 벽면이 어느 쪽에 이어지는지 알려줘")
+                UseCaseQuickChip("⚠️ Stairs / Glass Door", "전방에 회색 내리막 계단 첫 단, 보도턱 단차, 또는 투명 통유리문과 손잡이가 있는지 봐줘"),
+                UseCaseQuickChip("🚦 Crosswalk Signal", "횡단보도 보행자 신호등이 초록불인지 빨간불인지, 남은 시간과 정면 방향을 알려줘"),
+                UseCaseQuickChip("🌙 Low-Light Path", "어두운 구간인데 지금 걸어가는 바닥이 평탄한지, 손잡이나 벽면이 어느 쪽에 이어지는지 알려줘")
             )
         ),
         UseCaseCategoryTab(
             id = "TRANSIT_TAXI",
-            title = "🚇 대중교통·택시",
-            inputHint = "🚕 호출택시 번호(예: 택시 34바5678) 또는 승강장/역 질문",
+            title = "🚇 Transit & Taxi",
+            inputHint = "🚕 Enter Taxi Plate (e.g. 택시 34바5678) or transit query",
             chips = listOf(
-                UseCaseQuickChip("🚇 승강장 방면/빠른환승", "지금 지하철 승강장이 어느 역 방면인지, 몇 호차 몇 번 문(스크린도어 번호)인지 읽어줘"),
-                UseCaseQuickChip("🚃 열차 내 정거장/하차문", "지금 지하철 안인데 현재 어느 역이고 내릴 역까지 몇 정거장 남았는지, 어느 쪽 문이 열리는지 알려줘"),
-                UseCaseQuickChip("🚕 호출택시 번호판/승차문", "지금 앞에 멈춘 택시나 차량의 색상, 차종, 번호판 번호를 읽고 뒷좌석 문 손잡이 위치를 알려줘"),
-                UseCaseQuickChip("🚌 정류장/진입 버스 번호", "버스 정류장 표지판 번호나 지금 들어오는 버스 번호와 앞문 위치를 알려줘")
+                UseCaseQuickChip("🚇 Platform & Door#", "지금 지하철 승강장이 어느 역 방면인지, 몇 호차 몇 번 문(스크린도어 번호)인지 읽어줘"),
+                UseCaseQuickChip("🚃 On-Board Stops", "지금 지하철 안인데 현재 어느 역이고 내릴 역까지 몇 정거장 남았는지, 어느 쪽 문이 열리는지 알려줘"),
+                UseCaseQuickChip("🚕 Taxi Plate & Door", "지금 앞에 멈춘 택시나 차량의 색상, 차종, 번호판 번호를 읽고 뒷좌석 문 손잡이 위치를 알려줘"),
+                UseCaseQuickChip("🚌 Bus Stop & Route", "버스 정류장 표지판 번호나 지금 들어오는 버스 번호와 앞문 위치를 알려줘")
             )
         ),
         UseCaseCategoryTab(
             id = "SHOPPING_DINING_DOC",
-            title = "🛒 마트·식사·문서",
-            inputHint = "🛒 상품 비교, 식사 반찬 질문, 약봉지/소비기한/고지서 질문",
+            title = "🛒 Mart·Meal·Docs",
+            inputHint = "🛒 Compare items, meal layout, expiry date, or read full card",
             chips = listOf(
-                UseCaseQuickChip("🥤 마트 상품 맛/제로/1+1", "지금 들고 있는 상품의 정확한 제품명, 맛, 제로슈거 여부, 가격표, 1+1 행사 여부를 알려줘"),
-                UseCaseQuickChip("🍱 식탁 반찬 배치/가시/남은양", "접시나 식판 위 반찬 배치를 앞쪽 왼쪽/오른쪽, 위쪽 기준으로 설명하고 생선 가시나 남은 음식 위치를 알려줘"),
-                UseCaseQuickChip("💊 약봉지/안약/소비기한 D-Day", "약봉지 복용 시점(아침/점심/저녁)이나 안약 구분, 또는 식품 소비기한 날짜를 읽어 오늘 기준 며칠 남았는지 알려줘"),
-                UseCaseQuickChip("📄 고지서/택배 송장 3요소 요약", "고지서 청구금액·납부기한 또는 택배 송장의 받는 사람·보낸 곳·품목 핵심만 요약해 줘")
+                UseCaseQuickChip("🥤 Product / Zero / 1+1", "지금 들고 있는 상품의 정확한 제품명, 맛, 제로슈거 여부, 가격표, 1+1 행사 여부를 알려줘"),
+                UseCaseQuickChip("🍱 Meal & Utensils", "접시나 식판 위 반찬 배치를 앞쪽 왼쪽/오른쪽, 위쪽 기준으로 설명하고 생선 가시나 남은 음식 위치를 알려줘"),
+                UseCaseQuickChip("💊 Meds & Expiry Date", "약봉지 복용 시점(아침/점심/저녁)이나 안약 구분, 또는 식품 소비기한 날짜를 읽어 오늘 기준 며칠 남았는지 알려줘"),
+                UseCaseQuickChip("📖 Read Full Text", "눈앞에 보이는 카드나 문서의 내용 전체를 빠짐없이 끝까지 다 읽어줘")
             )
         ),
         UseCaseCategoryTab(
             id = "HOME_APPLIANCE_KIOSK",
-            title = "🏠 생활·가전·키오스크",
-            inputHint = "🏠 물건 찾기(예: 내 에어팟 어디 있어?) 또는 가전/키오스크 질문",
+            title = "🏠 Home & Kiosk",
+            inputHint = "🏠 Find item (e.g. 내 에어팟 어디 있어?) or appliance/kiosk",
             chips = listOf(
-                UseCaseQuickChip("🔥 인덕션 화구/잔열(H)·가전 LED", "평면 인덕션 켜진 화구 단계와 잔열(H) 화상 위험 여부, 또는 세탁기/전자레인지 현재 코스와 남은 시간을 알려줘"),
-                UseCaseQuickChip("🛗 엘리베이터 1층/키오스크 코칭", "엘리베이터 1층(로비층) 버튼에 불이 켜져 있는지 먼저 확인하고, 내 손가락에서 목표 버튼까지 상하좌우 몇 cm 이동할지 알려줘"),
-                UseCaseQuickChip("📌 눈앞 물건 위치 기억하기", "지금 화면에 보이는 생활 물건(에어팟, 안경, 열쇠, 리모컨, 지갑 등)과 놓인 위치를 기억해 줘"),
-                UseCaseQuickChip("🔍 기억해둔 물건 위치 찾기", "내가 아까 둔 에어팟이나 안경, 열쇠가 어디에 있는지 기억해 둔 위치를 모두 알려줘"),
-                UseCaseQuickChip("👕 외출 복장 얼룩/색상 점검", "지금 입은 옷의 색상 조합과 묻은 얼룩이나 먼지가 없는지 확인해 줘")
+                UseCaseQuickChip("🔥 Induction Heat / LED", "평면 인덕션 켜진 화구 단계와 잔열(H) 화상 위험 여부, 또는 세탁기/전자레인지 현재 코스와 남은 시간을 알려줘"),
+                UseCaseQuickChip("🛗 Elevator 1F / Kiosk", "엘리베이터 1층(로비층) 버튼에 불이 켜져 있는지 먼저 확인하고, 내 손가락에서 목표 버튼까지 상하좌우 몇 cm 이동할지 알려줘"),
+                UseCaseQuickChip("📌 Save Item Location", "지금 화면에 보이는 생활 물건(에어팟, 안경, 열쇠, 리모컨, 지갑 등)과 놓인 위치를 기억해 줘"),
+                UseCaseQuickChip("🔍 Recall Saved Items", "내가 아까 둔 에어팟이나 안경, 열쇠가 어디에 있는지 기억해 둔 위치를 모두 알려줘"),
+                UseCaseQuickChip("👕 Outfit & Stain Check", "지금 입은 옷의 색상 조합과 묻은 얼룩이나 먼지가 없는지 확인해 줘")
             )
         ),
         UseCaseCategoryTab(
             id = "PUBLIC_OFFICE",
-            title = "🚻 공공시설·오피스",
-            inputHint = "🚻 화장실, 카페 빈자리, 회의 슬라이드, 상대방 제스처 질문",
+            title = "🚻 Public & Office",
+            inputHint = "🚻 Restroom, empty cafe seat, slides, or social gesture",
             chips = listOf(
-                UseCaseQuickChip("🚻 화장실 남/녀 픽토그램·빈칸", "화장실 입구 표지판이 남자/여자 화장실 중 무엇인지, 안쪽 빈 칸(초록/빨강 표시)과 세면대 위치를 알려줘"),
-                UseCaseQuickChip("🤝 상대방 명함/악수 제스처", "앞에 계신 분이 악수나 명함, 물건을 건네며 손을 내밀고 있는지 알려줘"),
-                UseCaseQuickChip("📊 회의 화면/슬라이드 요약", "회의실 프로젝터나 모니터 발표 화면의 제목과 핵심 내용 2가지를 짧게 요약해 줘"),
-                UseCaseQuickChip("☕ 카페 빈 좌석/바닥 장애물", "주변에 앉을 수 있는 빈 좌석이 몇 걸음 앞에 있는지와 바닥 가방/의자 장애물을 알려줘")
+                UseCaseQuickChip("🚻 Restroom & Stall", "화장실 입구 표지판이 남자/여자 화장실 중 무엇인지, 안쪽 빈 칸(초록/빨강 표시)과 세면대 위치를 알려줘"),
+                UseCaseQuickChip("🤝 Handshake / Card", "앞에 계신 분이 악수나 명함, 물건을 건네며 손을 내밀고 있는지 알려줘"),
+                UseCaseQuickChip("📊 Slide Summary", "회의실 프로젝터나 모니터 발표 화면의 제목과 핵심 내용 2가지를 짧게 요약해 줘"),
+                UseCaseQuickChip("☕ Empty Cafe Seat", "주변에 앉을 수 있는 빈 좌석이 몇 걸음 앞에 있는지와 바닥 가방/의자 장애물을 알려줘")
             )
         )
     )
@@ -163,11 +181,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
     private var aiEnabled = false
     private var isListeningMic = false
     private var requestInFlight = false
+    @Volatile
+    private var inferenceEpoch: Int = 0
     private var lastSpokenText: String? = null
 
     companion object {
         private const val REQ_PERMS = 1001
-        private const val REALTIME_INTERVAL_MS = 1800L
+        private const val REQ_VOICE_FALLBACK = 1002
+        private const val REALTIME_INTERVAL_MS = 2200L
     }
 
     private val gpsListener = object : LocationListener {
@@ -218,7 +239,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         // 1. Unified Interactive Command Bar (Text + Voice Input -> Simulates voice commands for Pilot testing, Fixes LUM-65 & LUM-66)
-        val searchRow = LinearLayout(this).apply {
+        searchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(
@@ -230,7 +251,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         missionInput = EditText(this).apply {
-            hint = "💬 명령/답변 입력 (예: 구의역 가자 / 지하철로 / 출발)"
+            hint = "💬 Enter command, question, or place..."
             setHintTextColor(Color.parseColor("#94A3B8"))
             setTextColor(Color.WHITE)
             textSize = 13.5f
@@ -252,7 +273,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val sendCmdBtn = Button(this).apply {
-            text = "💬 전송"
+            text = "💬 Send"
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             setBackgroundColor(Color.parseColor("#FFD400"))
@@ -273,7 +294,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val searchDestBtn = Button(this).apply {
-            text = "🔍 장소검색"
+            text = "🔍 Place"
             textSize = 12.5f
             typeface = Typeface.DEFAULT_BOLD
             setBackgroundColor(Color.parseColor("#334155"))
@@ -339,8 +360,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         aiToggleBtn = Button(this).apply {
-            text = "🔴 AI동행: OFF"
-            textSize = 13.5f
+            text = "🔴 Live AI: OFF"
+            textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             setBackgroundColor(Color.parseColor("#3B1219"))
             setTextColor(Color.parseColor("#FFD7D7"))
@@ -353,12 +374,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val stopSpeechBtn = Button(this).apply {
-            text = "✋ 말끊기"
-            textSize = 13.5f
+            text = "✋ Stop"
+            textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             setBackgroundColor(Color.parseColor("#475569"))
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.85f).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.8f).apply {
                 setMargins(3, 0, 3, 0)
             }
             setOnClickListener {
@@ -369,12 +390,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         talkMicBtn = Button(this).apply {
-            text = "🎙️ 끊고말하기"
-            textSize = 13.5f
+            text = "🎙️ Push-to-Talk"
+            textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             setBackgroundColor(Color.parseColor("#1E293B"))
             setTextColor(Color.parseColor("#FFD400"))
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.05f).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.1f).apply {
                 setMargins(6, 0, 0, 0)
             }
             setOnClickListener {
@@ -406,8 +427,42 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             }
         }
 
+        // Top 2-Mode Switcher: [👓 글래스 실착용 모드 (Android XR Spec)] vs [🧪 UC 검증 & 피드백 보드]
+        val modeSwitcherRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 12)
+            }
+        }
+        glassModeTabBtn = Button(this).apply {
+            text = "👓 Glass Mode"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(0, 0, 6, 0)
+            }
+            setOnClickListener { switchAppTestMode(glassMode = true) }
+        }
+        labModeTabBtn = Button(this).apply {
+            text = "🧪 UC QA & Logs"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(6, 0, 0, 0)
+            }
+            setOnClickListener { switchAppTestMode(glassMode = false) }
+        }
+        modeSwitcherRow.addView(glassModeTabBtn)
+        modeSwitcherRow.addView(labModeTabBtn)
+
+        // Build Google Android XR AI Glasses Simulator Panel (Glimmer HUD + Temple Touchpad + Voice Feedback)
+        glassSimulatorPanel = buildGlassWearableSimulatorPanel()
+
         // 0. 6-Category Multi-Use-Case Verification Tabs + One-Tap Quick Scenario Chips (Fixes LUMO-130)
-        val categoryScroll = HorizontalScrollView(this).apply {
+        categoryScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -421,7 +476,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
         categoryScroll.addView(categoryTabRow)
 
-        val chipScroll = HorizontalScrollView(this).apply {
+        chipScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -435,13 +490,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
         chipScroll.addView(quickChipRow)
 
-        topCameraCard.addView(categoryScroll)
-        topCameraCard.addView(chipScroll)
-        topCameraCard.addView(searchRow)
+        labControlsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(categoryScroll)
+            addView(chipScroll)
+            addView(searchRow)
+        }
+
+        topCameraCard.addView(modeSwitcherRow)
+        topCameraCard.addView(labControlsContainer)
         topCameraCard.addView(candidateConfirmBox)
         topCameraCard.addView(activeNavBanner)
         topCameraCard.addView(toggleAndMicRow)
         topCameraCard.addView(cameraTextureView)
+        topCameraCard.addView(glassSimulatorPanel)
 
         renderUseCaseCategoryTabsAndChips()
 
@@ -468,7 +530,289 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         setContentView(root)
 
         renderHistoryList()
+        val initialEntries = FeedbackLogStore.listEntries(this)
+        if (initialEntries.isNotEmpty()) {
+            latestEntryId = initialEntries.first().id
+            updateGlassHudBanner(
+                modeTag = initialEntries.first().detectedMode,
+                latencyMs = initialEntries.first().latencyMs,
+                spoken = initialEntries.first().spokenKorean
+            )
+        }
+        switchAppTestMode(glassMode = true)
         syncExecutor.execute { FeedbackLogStore.trySyncToServerAsync(this) }
+    }
+
+    /**
+     * Switches between:
+     * 1. `👓 글래스 실착용 모드` (Google Android XR AI Glasses Spec: Glimmer HUD + Giant Eyes-Free Temple Touchpad + Physical Volume Key Mapping + Voice Feedback)
+     * 2. `🧪 UC 검증·피드백 보드` (6-Category Tabs + 23 One-Tap Use-Case Chips + Text Input + Full Scrollable History List)
+     */
+    private fun switchAppTestMode(glassMode: Boolean) {
+        isGlassWearableMode = glassMode
+        glassModeTabBtn.setBackgroundColor(if (glassMode) Color.parseColor("#FFD400") else Color.parseColor("#1E293B"))
+        glassModeTabBtn.setTextColor(if (glassMode) Color.BLACK else Color.WHITE)
+        labModeTabBtn.setBackgroundColor(if (!glassMode) Color.parseColor("#FFD400") else Color.parseColor("#1E293B"))
+        labModeTabBtn.setTextColor(if (!glassMode) Color.BLACK else Color.WHITE)
+
+        if (glassMode) {
+            labControlsContainer.visibility = View.GONE
+            historyScrollView.visibility = View.GONE
+            glassSimulatorPanel.visibility = View.VISIBLE
+            cameraTextureView.layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                190
+            ).apply { setMargins(0, 0, 0, 10) }
+        } else {
+            glassSimulatorPanel.visibility = View.GONE
+            labControlsContainer.visibility = View.VISIBLE
+            historyScrollView.visibility = View.VISIBLE
+            cameraTextureView.layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                250
+            )
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun buildGlassWearableSimulatorPanel(): LinearLayout {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        // 1. Glimmer-inspired Optical HUD Card (High-contrast latest guidance)
+        val hudCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#080B10"))
+            setPadding(22, 16, 22, 16)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 12) }
+        }
+        glassHudModeBadge = TextView(this).apply {
+            text = "👓 GLIMMER HUD · Ready (Vol UP = Talk | Vol DOWN = Snap)"
+            setTextColor(Color.parseColor("#38BDF8"))
+            textSize = 11.5f
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        glassHudSpeechTv = TextView(this).apply {
+            text = "Touch & Hold the Temple Touchpad below to ask a question, or Double-Tap to scan what is in front of you."
+            setTextColor(Color.WHITE)
+            textSize = 15.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 8, 0, 0)
+        }
+        hudCard.addView(glassHudModeBadge)
+        hudCard.addView(glassHudSpeechTv)
+
+        // 2. Giant Eyes-Free Temple Touchpad Surface (Google Android XR AI Glasses Gesture Spec)
+        val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                val isSpeaking = tts?.isSpeaking == true
+                val activeRt = WayfindingNavigator.activeRoute
+                if (isSpeaking) {
+                    tts?.stop()
+                    SpatialEarconSynthesizer.play(EarconKind.BARGE_IN_ACK)
+                    glassTouchpadStatusTv.text = "✋ [Tap] Speech muted"
+                } else if (activeRt != null && !activeRt.isConfirmedByUser) {
+                    glassTouchpadStatusTv.text = "🚀 [Tap] Route confirmed — Live guidance ON"
+                    startConfirmedMissionExecution()
+                } else if (!lastSpokenText.isNullOrBlank()) {
+                    glassTouchpadStatusTv.text = "🔁 [Tap] Repeating last guidance"
+                    speakNative(lastSpokenText!!, autoListenAfter = false)
+                } else {
+                    glassTouchpadStatusTv.text = "📸 [Tap] Scanning current frame..."
+                    runSingleInferenceStep()
+                }
+                return true
+            }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                tts?.stop()
+                glassTouchpadStatusTv.text = "📸 [Double-Tap] Analyzing camera frame..."
+                runSingleInferenceStep()
+                return true
+            }
+
+            override fun onLongPress(e: MotionEvent) {
+                isRecordingVoiceFeedback = false
+                glassTouchpadStatusTv.text = "🎙️ [Touch & Hold] Listening — Speak now..."
+                startInlineVoiceListening()
+            }
+
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                val dx = (e2.x - (e1?.x ?: e2.x))
+                if (kotlin.math.abs(dx) > 90 && kotlin.math.abs(velocityX) > 150) {
+                    val cands = WayfindingNavigator.lastSearchResult?.candidatesRecommended.orEmpty()
+                    if (cands.isNotEmpty()) {
+                        candidateSwipeCursor = if (dx > 0) {
+                            (candidateSwipeCursor + 1) % cands.size
+                        } else {
+                            (candidateSwipeCursor - 1 + cands.size) % cands.size
+                        }
+                        val c = cands[candidateSwipeCursor]
+                        val msg = "${c.index}번 후보: 대중교통 약 ${c.transitMinutes}분 거리인 ${c.spokenPlaceWithAddrKo}예요."
+                        glassTouchpadStatusTv.text = "👉 [Swipe] Candidate #${c.index} (${c.name})"
+                        speakNative(msg, autoListenAfter = false)
+                    } else {
+                        setAiToggleState(!aiEnabled)
+                        glassTouchpadStatusTv.text = if (aiEnabled) "🟢 [Swipe] Live AI ON" else "🔴 [Swipe] Live AI OFF"
+                    }
+                    return true
+                }
+                return false
+            }
+        })
+
+        val touchpadZone = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#1E293B"))
+            setPadding(24, 34, 24, 34)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                340
+            ).apply { setMargins(0, 0, 0, 12) }
+            setOnTouchListener { _, event -> gestureDetector.onTouchEvent(event) }
+        }
+        val padTitle = TextView(this).apply {
+            text = "👆 TEMPLE TOUCHPAD (Eyes-Free Gesture Zone)"
+            setTextColor(Color.parseColor("#FFD400"))
+            textSize = 14.5f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+        val padGuide = TextView(this).apply {
+            text = "• Single Tap: Mute Speech / Repeat / Confirm Route\n• Touch & Hold: 🎙️ Ask Lumo (Voice Query)\n• Double Tap: 📸 Instant Camera Snap\n• Swipe L/R: Cycle Candidates / Toggle Live AI\n• Hardware Vol UP: Talk | Vol DOWN: Snap (2x = Live AI)"
+            setTextColor(Color.parseColor("#CBD5E1"))
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding(0, 12, 0, 10)
+        }
+        glassTouchpadStatusTv = TextView(this).apply {
+            text = "Ready"
+            setTextColor(Color.parseColor("#00E676"))
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+        touchpadZone.addView(padTitle)
+        touchpadZone.addView(padGuide)
+        touchpadZone.addView(glassTouchpadStatusTv)
+
+        // 3. Hands-Free Instant Feedback Row
+        val quickFbRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+        val quickUpBtn = Button(this).apply {
+            text = "👍 Good"
+            textSize = 13.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setBackgroundColor(Color.parseColor("#065F46"))
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.85f).apply {
+                setMargins(0, 0, 6, 0)
+            }
+            setOnClickListener {
+                val id = latestEntryId
+                if (id != null) {
+                    syncExecutor.execute {
+                        FeedbackLogStore.updateFeedback(this@MainActivity, id, vote = "UP")
+                        FeedbackLogStore.trySyncToServerAsync(this@MainActivity)
+                        runOnUiThread { renderHistoryList() }
+                    }
+                    SpatialEarconSynthesizer.play(EarconKind.TARGET_FOUND)
+                    Toast.makeText(this@MainActivity, "👍 Marked Helpful!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        val quickVoiceDownBtn = Button(this).apply {
+            text = "👎 Bad (🎙️ Voice Note)"
+            textSize = 13.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setBackgroundColor(Color.parseColor("#7F1D1D"))
+            setTextColor(Color.parseColor("#FECACA"))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.15f).apply {
+                setMargins(6, 0, 0, 0)
+            }
+            setOnClickListener {
+                val id = latestEntryId
+                if (id == null) {
+                    Toast.makeText(this@MainActivity, "No recent response to rate yet.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                syncExecutor.execute {
+                    FeedbackLogStore.updateFeedback(this@MainActivity, id, vote = "DOWN")
+                    FeedbackLogStore.trySyncToServerAsync(this@MainActivity)
+                }
+                isRecordingVoiceFeedback = true
+                glassTouchpadStatusTv.text = "📝 [Voice Feedback] Speak what went wrong..."
+                startInlineVoiceListening()
+            }
+        }
+        quickFbRow.addView(quickUpBtn)
+        quickFbRow.addView(quickVoiceDownBtn)
+
+        panel.addView(hudCard)
+        panel.addView(touchpadZone)
+        panel.addView(quickFbRow)
+        return panel
+    }
+
+    private fun updateGlassHudBanner(modeTag: String, latencyMs: Long, spoken: String) {
+        if (!::glassHudModeBadge.isInitialized) return
+        glassHudModeBadge.text = "👓 [$modeTag] · ${latencyMs}ms"
+        glassHudSpeechTv.text = spoken
+    }
+
+    /**
+     * Hardware Button Mapping in `👓 글래스 실착용 모드` (Simulates Google Android XR AI Glasses side buttons):
+     * - Physical Volume UP -> Immediate Barge-in + Push-to-Talk Voice Query (`Invoke AI`)
+     * - Physical Volume DOWN (Single press) -> Instant 1-Frame Camera Vision Snap
+     * - Physical Volume DOWN (Double press < 450ms) -> `TOGGLE_APP_CAMERA` Continuous Companion ON/OFF
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (isGlassWearableMode && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP -> {
+                    isRecordingVoiceFeedback = false
+                    glassTouchpadStatusTv.text = "🎙️ [Vol UP] Listening — Ask Lumo now..."
+                    startInlineVoiceListening()
+                    return true
+                }
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    val now = System.currentTimeMillis()
+                    if (now - lastVolDownPressMs < 450L) {
+                        setAiToggleState(!aiEnabled)
+                        glassTouchpadStatusTv.text = if (aiEnabled) "🟢 [2x Vol DOWN] Live AI ON" else "🔴 [2x Vol DOWN] Live AI OFF"
+                        lastVolDownPressMs = 0L
+                    } else {
+                        lastVolDownPressMs = now
+                        tts?.stop()
+                        glassTouchpadStatusTv.text = "📸 [Vol DOWN] Analyzing camera frame..."
+                        runSingleInferenceStep()
+                    }
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun renderUseCaseCategoryTabsAndChips() {
@@ -552,6 +896,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         syncExecutor.execute {
             val saved = FeedbackLogStore.addEntry(this, replyObj, frameB64)
             runOnUiThread {
+                latestEntryId = saved.id
+                updateGlassHudBanner(modeTag, latencyMs, agentSpoken)
                 prependEntryCard(saved)
             }
             FeedbackLogStore.trySyncToServerAsync(this)
@@ -569,7 +915,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         candidateConfirmBox.visibility = View.VISIBLE
 
         val loadingTv = TextView(this).apply {
-            text = "⏳ 현재 GPS 출발지 확인 및 '$query' 검색 중..."
+            text = "⏳ Locating GPS origin & searching '$query'..."
             setTextColor(Color.parseColor("#FFD400"))
             textSize = 13.5f
         }
@@ -601,7 +947,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         candidateConfirmBox.removeAllViews()
 
         val originTv = TextView(this).apply {
-            text = "📍 출발지 확인: ${searchRes.originAddressKo}\n어느 목적지로 안내할까요? (추천순 / 거리순 선택 가능)"
+            text = "📍 Origin: ${searchRes.originAddressKo}\nSelect Destination (Recommended vs. Closest)"
             setTextColor(Color.parseColor("#FFD400"))
             textSize = 13.5f
             typeface = Typeface.DEFAULT_BOLD
@@ -620,7 +966,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val recTabBtn = Button(this).apply {
-            text = "⭐ 추천순 (보행최적)"
+            text = "⭐ Recommended"
             textSize = 12.5f
             typeface = Typeface.DEFAULT_BOLD
             setBackgroundColor(if (!sortByDistance) Color.parseColor("#FFD400") else Color.parseColor("#334155"))
@@ -634,7 +980,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val distTabBtn = Button(this).apply {
-            text = "📏 거리순 (최단거리)"
+            text = "📏 Closest"
             textSize = 12.5f
             typeface = Typeface.DEFAULT_BOLD
             setBackgroundColor(if (sortByDistance) Color.parseColor("#FFD400") else Color.parseColor("#334155"))
@@ -664,7 +1010,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             }
 
             val transitBtn = Button(this).apply {
-                text = "🚇 ${cand.index}번: ${cand.spokenPlaceWithAddrKo}\n(대중교통 약 ${cand.transitMinutes}분 · ${cand.distanceMeters}m)"
+                text = "🚇 #${cand.index}: ${cand.spokenPlaceWithAddrKo}\n(Transit ~${cand.transitMinutes}m · ${cand.distanceMeters}m)"
                 textSize = 12f
                 setBackgroundColor(Color.parseColor("#00E676"))
                 setTextColor(Color.BLACK)
@@ -683,7 +1029,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             }
 
             val walkBtn = Button(this).apply {
-                text = "🚶 도보(${cand.walkMinutes}분)"
+                text = "🚶 Walk (${cand.walkMinutes}m)"
                 textSize = 12f
                 setBackgroundColor(Color.parseColor("#FFD400"))
                 setTextColor(Color.BLACK)
@@ -705,7 +1051,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val cancelBtn = Button(this).apply {
-            text = "❌ 검색 취소"
+            text = "❌ Cancel Search"
             textSize = 12.5f
             setBackgroundColor(Color.parseColor("#334155"))
             setTextColor(Color.WHITE)
@@ -749,7 +1095,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             else -> "버스/대중교통+도보"
         }
         val loadingTv = TextView(this).apply {
-            text = "⏳ '${candidate.name}'까지 전체 $modeStr 이동 계획을 설계하고 있어요..."
+            text = "⏳ Building Macro Route Plan to '${candidate.name}'..."
             setTextColor(Color.parseColor("#FFD400"))
             textSize = 13.5f
         }
@@ -794,7 +1140,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         candidateConfirmBox.visibility = View.VISIBLE
 
         val titleTv = TextView(this).apply {
-            text = "🗺️ 전체 이동 계획 확인 (${route.originAddressKo} → ${route.destination.name})"
+            text = "🗺️ Macro Route Plan (${route.originAddressKo} → ${route.destination.name})"
             setTextColor(Color.parseColor("#FFD400"))
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
@@ -802,7 +1148,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
         candidateConfirmBox.addView(titleTv)
 
-        // LUM-68 & LUM-70: Mode Switch Tabs ([🚇 지하철 노선] | [🚌 버스 경로] | [🚶 도보 전용])
         val modeSwitchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -814,7 +1159,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val subModeBtn = Button(this).apply {
-            text = "🚇 지하철노선"
+            text = "🚇 Subway"
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             val active = preferTransit && preferSubwayOnly
@@ -837,7 +1182,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val busModeBtn = Button(this).apply {
-            text = "🚌 버스경로"
+            text = "🚌 Bus"
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             val active = preferTransit && !preferSubwayOnly
@@ -860,7 +1205,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val walkModeBtn = Button(this).apply {
-            text = "🚶 도보전용"
+            text = "🚶 Walk Only"
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             val active = !preferTransit
@@ -906,7 +1251,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val startBtn = Button(this).apply {
-            text = "🚀 네, 이 계획으로 출발 확정! (실시간 동행 시작)"
+            text = "🚀 Confirm & Start Live Guidance"
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
             setBackgroundColor(Color.parseColor("#00E676"))
@@ -924,7 +1269,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         candidateConfirmBox.addView(startBtn)
 
         val backBtn = Button(this).apply {
-            text = "🔄 다른 목적지 후보 다시 고르기"
+            text = "🔄 Choose Another Candidate"
             textSize = 12.5f
             setBackgroundColor(Color.parseColor("#334155"))
             setTextColor(Color.WHITE)
@@ -946,16 +1291,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         candidateConfirmBox.addView(backBtn)
     }
 
-    /**
-     * Phase 3 of User Journey:
-     * Locks in the confirmed macro route plan and starts real-time camera + GPS + compass guidance.
-     */
     private fun startConfirmedMissionExecution() {
         val startSpeech = WayfindingNavigator.activateConfirmedRoute()
         candidateConfirmBox.visibility = View.GONE
         updateActiveNavBannerUi()
         aiEnabled = true
-        aiToggleBtn.text = "🟢 AI 동행: ON"
+        aiToggleBtn.text = "🟢 Live AI: ON"
         aiToggleBtn.setBackgroundColor(Color.parseColor("#00E676"))
         aiToggleBtn.setTextColor(Color.BLACK)
         openRearCamera()
@@ -1041,7 +1382,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         mainHandler.removeCallbacks(realtimeLoopRunnable)
 
         if (aiEnabled) {
-            aiToggleBtn.text = "🟢 AI 동행: ON"
+            aiToggleBtn.text = "🟢 Live AI: ON"
             aiToggleBtn.setBackgroundColor(Color.parseColor("#00E676"))
             aiToggleBtn.setTextColor(Color.BLACK)
             openRearCamera()
@@ -1049,7 +1390,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             runSingleInferenceStep(userQuery = "")
             mainHandler.postDelayed(realtimeLoopRunnable, REALTIME_INTERVAL_MS)
         } else {
-            aiToggleBtn.text = "🔴 AI 동행: OFF"
+            aiToggleBtn.text = "🔴 Live AI: OFF"
             aiToggleBtn.setBackgroundColor(Color.parseColor("#3B1219"))
             aiToggleBtn.setTextColor(Color.parseColor("#FFD7D7"))
             stopInlineVoiceListening()
@@ -1063,44 +1404,61 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             requestRuntimePermissionsIfNeeded()
             return
         }
+        inferenceEpoch += 1
+        requestInFlight = false
+        mainHandler.removeCallbacks(realtimeLoopRunnable)
         tts?.stop()
         SpatialEarconSynthesizer.play(EarconKind.SCANNING_TICK)
 
         try {
-            if (speechRecognizer == null && SpeechRecognizer.isRecognitionAvailable(this)) {
+            if (speechRecognizer == null) {
                 speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
                     setRecognitionListener(object : RecognitionListener {
                         override fun onReadyForSpeech(params: Bundle?) {
                             isListeningMic = true
-                            talkMicBtn.text = "👂 듣고 있어요..."
+                            talkMicBtn.text = "👂 Listening..."
                             talkMicBtn.setBackgroundColor(Color.parseColor("#FFD400"))
                             talkMicBtn.setTextColor(Color.BLACK)
+                            if (::glassTouchpadStatusTv.isInitialized && !isRecordingVoiceFeedback) {
+                                glassTouchpadStatusTv.text = "👂 Mic Active — Speak your question or destination!"
+                            }
                         }
                         override fun onBeginningOfSpeech() {}
                         override fun onRmsChanged(rmsdB: Float) {}
                         override fun onBufferReceived(buffer: ByteArray?) {}
                         override fun onEndOfSpeech() {
                             isListeningMic = false
-                            talkMicBtn.text = "🎙️ 루모에게 말하기"
+                            talkMicBtn.text = "🎙️ Push-to-Talk"
                             talkMicBtn.setBackgroundColor(Color.parseColor("#1E293B"))
                             talkMicBtn.setTextColor(Color.parseColor("#FFD400"))
                         }
                         override fun onError(error: Int) {
                             isListeningMic = false
-                            talkMicBtn.text = "🎙️ 루모에게 말하기"
+                            talkMicBtn.text = "🎙️ Push-to-Talk"
                             talkMicBtn.setBackgroundColor(Color.parseColor("#1E293B"))
                             talkMicBtn.setTextColor(Color.parseColor("#FFD400"))
+                            if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                                launchSystemVoiceFallbackDialog()
+                            } else if (::glassTouchpadStatusTv.isInitialized) {
+                                glassTouchpadStatusTv.text = "⚠️ Didn't catch that — Try holding or tapping Vol UP again"
+                            }
                         }
                         override fun onResults(results: Bundle?) {
                             isListeningMic = false
-                            talkMicBtn.text = "🎙️ 루모에게 말하기"
+                            talkMicBtn.text = "🎙️ Push-to-Talk"
                             talkMicBtn.setBackgroundColor(Color.parseColor("#1E293B"))
                             talkMicBtn.setTextColor(Color.parseColor("#FFD400"))
                             val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                                 ?.firstOrNull()?.trim() ?: return
-                            handleUserSpokenConversation(spoken)
+                            processRecognizedSpeech(spoken)
                         }
-                        override fun onPartialResults(partialResults: Bundle?) {}
+                        override fun onPartialResults(partialResults: Bundle?) {
+                            val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                                ?.firstOrNull()?.trim()
+                            if (!partial.isNullOrBlank() && ::glassTouchpadStatusTv.isInitialized) {
+                                glassTouchpadStatusTv.text = "👂 Hearing: \"$partial\""
+                            }
+                        }
                         override fun onEvent(eventType: Int, params: Bundle?) {}
                     })
                 }
@@ -1109,16 +1467,66 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             }
+            speechRecognizer?.cancel()
             speechRecognizer?.startListening(intent)
+        } catch (_: Exception) {
+            launchSystemVoiceFallbackDialog()
+        }
+    }
+
+    private fun launchSystemVoiceFallbackDialog() {
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, if (isRecordingVoiceFeedback) "Speak your feedback note" else "Ask Lumo or say a destination")
+            }
+            startActivityForResult(intent, REQ_VOICE_FALLBACK)
         } catch (_: Exception) {}
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_VOICE_FALLBACK && resultCode == RESULT_OK) {
+            val spoken = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
+            if (!spoken.isNullOrBlank()) {
+                processRecognizedSpeech(spoken)
+            }
+        }
+    }
+
+    private fun processRecognizedSpeech(spoken: String) {
+        if (isRecordingVoiceFeedback) {
+            isRecordingVoiceFeedback = false
+            val targetId = latestEntryId
+            if (targetId != null) {
+                syncExecutor.execute {
+                    FeedbackLogStore.updateFeedback(
+                        context = this@MainActivity,
+                        id = targetId,
+                        vote = "DOWN",
+                        feedbackText = spoken
+                    )
+                    FeedbackLogStore.trySyncToServerAsync(this@MainActivity)
+                    runOnUiThread { renderHistoryList() }
+                }
+                glassTouchpadStatusTv.text = "✅ Voice Note Saved: \"$spoken\""
+                speakNative("피드백 메모를 저장했어요.", autoListenAfter = false)
+            }
+            return
+        }
+
+        glassTouchpadStatusTv.text = "🗣️ Heard: \"$spoken\" → Thinking..."
+        handleUserSpokenConversation(spoken)
     }
 
     private fun stopInlineVoiceListening() {
         isListeningMic = false
         try { speechRecognizer?.cancel() } catch (_: Exception) {}
-        talkMicBtn.text = "🎙️ 루모에게 말하기"
+        talkMicBtn.text = "🎙️ Push-to-Talk"
         talkMicBtn.setBackgroundColor(Color.parseColor("#1E293B"))
         talkMicBtn.setTextColor(Color.parseColor("#FFD400"))
     }
@@ -1307,7 +1715,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
     }
 
     private fun runSingleInferenceStep(userQuery: String = "") {
-        if (requestInFlight) return
+        // LUM-142 & LUM-144: NEVER drop an explicit user voice/text query even if a background vision request was in flight!
+        if (userQuery.isBlank() && (requestInFlight || isListeningMic)) return
+        if (userQuery.isNotBlank()) {
+            inferenceEpoch += 1
+        }
+        val myEpoch = inferenceEpoch
         requestInFlight = true
 
         updateActiveNavBannerUi()
@@ -1349,8 +1762,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
 
             // Zero-Wait TTS: Speak and update UI IMMEDIATELY on main thread before disk write or server sync!
             runOnUiThread {
+                // Discard stale background camera response if user interrupted with mic/question while it was in flight!
+                if (myEpoch != inferenceEpoch) {
+                    return@runOnUiThread
+                }
                 requestInFlight = false
+                val displaySpoken = if (userQuery.isNotBlank() && !userQuery.startsWith("(")) {
+                    "[Query: $userQuery] → ${reply.spokenKorean}"
+                } else {
+                    reply.spokenKorean
+                }
                 lastSpokenText = reply.spokenKorean
+                updateGlassHudBanner(reply.detectedModeTag, reply.latencyMs, displaySpoken)
+                glassTouchpadStatusTv.text = "✅ Completed (${reply.latencyMs}ms)"
 
                 // Execute Single-Pass LLM Tool Call (`NAV_CONTROL`) if Gemini emitted a navigation action!
                 if (!reply.navAction.isNullOrBlank()) {
@@ -1412,13 +1836,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             }
 
             // Persist and sync asynchronously on low-priority syncExecutor so it NEVER delays speech or next inference!
+            val loggedReply = if (userQuery.isNotBlank() && !userQuery.startsWith("(")) {
+                reply.copy(spokenKorean = "[내 질문: $userQuery] → ${reply.spokenKorean}")
+            } else {
+                reply
+            }
             syncExecutor.execute {
                 val savedEntry = FeedbackLogStore.addEntry(
                     context = this,
-                    reply = reply,
+                    reply = loggedReply,
                     imageBase64 = captured.base64Jpeg
                 )
                 runOnUiThread {
+                    latestEntryId = savedEntry.id
                     prependEntryCard(savedEntry)
                 }
                 FeedbackLogStore.trySyncToServerAsync(this)
@@ -1477,7 +1907,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val modeLabel = TextView(this).apply {
-            text = "🤖 추론 상황: [${entry.detectedMode}] ${entry.detectedModeLabelKo}"
+            text = "🤖 Skill: [${entry.detectedMode}]"
             setTextColor(Color.parseColor("#FFD400"))
             textSize = 13.5f
             typeface = Typeface.DEFAULT_BOLD
@@ -1531,7 +1961,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         upBtn = Button(this).apply {
-            text = "👍 추천"
+            text = "👍 Good"
             textSize = 13f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 setMargins(0, 0, 8, 0)
@@ -1545,7 +1975,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         downBtn = Button(this).apply {
-            text = "👎 비추천"
+            text = "👎 Bad"
             textSize = 13f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 setMargins(8, 0, 0, 0)
@@ -1568,7 +1998,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val feedbackInput = EditText(this).apply {
-            hint = "상세 피드백 입력 (터치 시 상단 화면이 접혀 넓게 보입니다)"
+            hint = "Enter feedback note (top panel auto-collapses while typing)"
             setHintTextColor(Color.parseColor("#64748B"))
             setText(entry.feedbackText)
             setTextColor(Color.WHITE)
@@ -1580,7 +2010,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 setMargins(0, 0, 12, 0)
             }
-            // LUM-72 Fix: Collapse top camera preview & candidate panels while typing feedback so the input box is NEVER covered!
             setOnFocusChangeListener { _, hasFocus ->
                 if (hasFocus) {
                     tts?.stop()
@@ -1606,7 +2035,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         val saveMemoBtn = Button(this).apply {
-            text = "저장"
+            text = "Save"
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             setBackgroundColor(Color.parseColor("#FFD400"))
@@ -1618,7 +2047,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                 val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
                 imm?.hideSoftInputFromWindow(feedbackInput.windowToken, 0)
                 cameraTextureView.visibility = View.VISIBLE
-                Toast.makeText(this@MainActivity, "피드백이 저장되었습니다.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Feedback saved.", Toast.LENGTH_SHORT).show()
             }
         }
 
