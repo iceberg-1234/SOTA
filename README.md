@@ -5,9 +5,7 @@
 **An Open-Source AI Smart-Glass Companion for Blind and Low-Vision Independence**
 
 ![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)
-
 ![Release Stage](https://img.shields.io/badge/Stage-v0.2.0--poc%20(Field%20Alpha)-amber.svg)
-
 ![Platform](https://img.shields.io/badge/Android%20XR-AI%20Glasses%20Ready-3DDC84.svg)
 
 *Eye-level perception, hands-free mobility, and independent daily living — built in the open for every city and language.*
