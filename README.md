@@ -236,7 +236,7 @@ npm run pre-pr
 
 ## Built With AI
 
-- **Google Gemini 4 & Cognition [Devin](https://devin.ai)** — Powered end-to-end across domain research, system architecture, codebase implementation, and QA simulation with human-in-the-loop field-feedback iterations.
+- **Google Gemini 4 & Cognition Devin — Powered end-to-end across domain research, system architecture, codebase implementation, and QA simulation with human-in-the-loop field-feedback iterations. 
 
 ---
 
