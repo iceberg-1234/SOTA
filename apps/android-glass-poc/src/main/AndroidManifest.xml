@@ -13,12 +13,26 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <!-- Android 11+ (API 30+) Package Visibility requirement for SpeechRecognizer & TTS (Fixes LUM-142 & LUM-144!) -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
-        android:label="Lumo (루모) AI Glass"
+        android:label="Lumo AI Glass"
         android:usesCleartextTraffic="true"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
+        <!-- Host Phone & Google Android XR AI Glasses Projected Launcher Entry -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -28,6 +42,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.XR_PROJECTED_LAUNCHER" />
             </intent-filter>
         </activity>
 

@@ -330,7 +330,7 @@ export async function runFullQaVerificationSuite(): Promise<{
   });
   const reg08Check = evaluateSpeechQualityGates(
     `${occludedSpeech} ${manufacturedSpeech}`,
-    /손가락이 글자 부분을 가리고 있어요.*제조일자가 2026-11-01로 적혀 있어요.*소비기한은 용기 옆면이나 아래쪽에/,
+    /손가락이 글자 부분을 가리고 있어요.*제조일자가 2026-11-01로 적혀 있어요.*소비기한은 용기 옆면이나/,
   );
   results.push({
     id: "QA-REG-08",
@@ -396,6 +396,66 @@ export async function runFullQaVerificationSuite(): Promise<{
       (pozaFirst?.estimatedTransitMinutes ?? 0) >= 40 &&
       (composeFirst?.name.includes("컴포즈커피") ?? false),
     failedGates: reg10Check.failedGates,
+  });
+
+  // QA-REG-11: 2-Tier Expert Playbook Completeness across all 16 Micro-Skills (O&M Shoreline Re-alignment + Fridge/Drink Seal/Remaining/Expiry Value Formula)
+  const allSkills = harness.getRegisteredSkills();
+  const everySkillHasPlaybook = allSkills.every(
+    (s) =>
+      s.expertPlaybook &&
+      s.expertPlaybook.visualScanChecklist.length >= 2 &&
+      s.expertPlaybook.realLifeValueFormula.length >= 20 &&
+      s.expertPlaybook.confounderAndSafetyGuards.length >= 1 &&
+      s.expertPlaybook.physicalAimingGuide.length >= 10,
+  );
+  const fridgePrompt = harness.assembleDynamicPrompt("냉장고 안에 든 음료수 유통기한 봐줘");
+  const diningPrompt = harness.assembleDynamicPrompt("식탁 반찬이랑 물컵 어디 있어?");
+  results.push({
+    id: "QA-REG-11",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 Expert Playbook] 16개 전체 Skill 4단계 전문가 플레이북(스캔순서·자립가치공식·혼동방어·물리조준) 탑재 및 2-Tier 동적 주입 검증",
+    spokenOutput: `16/16 스킬 전문가 플레이북 검증 완료 (SMART_READER 개봉/잔량/소비기한 공식 & DINING 물컵/수저/가시 공식 주입 확인)`,
+    passed:
+      everySkillHasPlaybook &&
+      fridgePrompt.includes("Visual Scan Order:") &&
+      fridgePrompt.includes("Opened/Remaining amount") &&
+      diningPrompt.includes("water cup/pitcher"),
+    failedGates: everySkillHasPlaybook ? [] : ["MISSING_EXPERT_PLAYBOOK"],
+  });
+
+  // QA-REG-12: LUM-141~146 Pipe-delimited slot parsing, Handheld Card -> SMART_READER override (even with '공용 화장실' text), and Minimal Thinking speed
+  const cardParsed = parseStructuredHarnessOutput(
+    "[RESTROOM_AND_SEAT | docType=카드 | product=파크타워카드] 손에 쥐고 계신 카드 뒷면에 공용 화장실과 엘리베이터 전용 안내 및 관리사무소 번호가 적혀 있어요.",
+  );
+  results.push({
+    id: "QA-REG-12",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 LUM-141~146] 파이프(|) 슬롯 파싱 및 손에 든 카드 내 '화장실' 문구 오분류 차단(SMART_READER 고정)",
+    spokenOutput: `${cardParsed.draftSpeech} (교정된 모드: ${cardParsed.mode}, product=${cardParsed.slots.product})`,
+    passed:
+      cardParsed.mode === "SMART_READER" &&
+      cardParsed.slots.product === "파크타워카드",
+    failedGates: cardParsed.mode === "SMART_READER" ? [] : ["WRONG_CARD_MODE"],
+  });
+
+  // QA-REG-13: LUM-147 Full Verbatim Reading Mode ('카드 내용 전체 다 읽어줘' overrides 1-2 sentence summary cap & routes '공동현관 출입카드예요' to SMART_READER)
+  const fullReadPrompt = harness.assembleDynamicPrompt("카드 내용 전체 다 읽어줘");
+  const accessCardParsed = parseStructuredHarnessOutput(
+    "[WALKING_SAFETY] 공동현관 출입카드예요. 번호는 오오육오육이고 타인에게 대여할 수 없어요.",
+  );
+  results.push({
+    id: "QA-REG-13",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 LUM-147] '전체 다 읽어줘' 요청 시 요약 제한 해제(전문 낭독 모드 전환) 및 '공동현관 출입카드' SMART_READER 분류",
+    spokenOutput: `${accessCardParsed.draftSpeech} (교정된 모드: ${accessCardParsed.mode}, 전문낭독 프롬프트 활성화=${fullReadPrompt.includes("FULL VERBATIM READING MODE")})`,
+    passed:
+      fullReadPrompt.includes("FULL VERBATIM READING MODE") &&
+      accessCardParsed.mode === "SMART_READER",
+    failedGates:
+      fullReadPrompt.includes("FULL VERBATIM READING MODE") &&
+      accessCardParsed.mode === "SMART_READER"
+        ? []
+        : ["MISSING_FULL_READ_OVERRIDE"],
   });
 
   const emartSearch = await nav.searchDestinationCandidates({

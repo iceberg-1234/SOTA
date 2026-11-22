@@ -262,8 +262,11 @@ export class GeminiVisionAgent {
         },
       ],
       generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: req.maxOutputTokens ?? 220,
+        temperature: 0.15,
+        maxOutputTokens: req.maxOutputTokens ?? 160,
+        thinkingConfig: {
+          thinkingLevel: "MINIMAL",
+        },
       },
     };
   }
