@@ -287,7 +287,7 @@ export class GeminiVisionAgent {
         spokenKorean: this.offlineHeuristicFallback(req.userPrompt),
         latencyMs: Date.now() - start,
         diagnostic:
-          "macOS Keychain(LUMO_GEMINI_API_KEY) 또는 GEMINI_API_KEY 환경변수에 키가 없습니다.",
+          "macOS Keychain(SOTA_GEMINI_API_KEY) 또는 GEMINI_API_KEY 환경변수에 키가 없습니다.",
       };
     }
 
@@ -359,7 +359,7 @@ export class GeminiVisionAgent {
 
     const response = await this.generateVisionBriefing({
       userPrompt:
-        "시각장애인 보행 보조 테스트입니다. '루모 비전 연결 정상입니다.'라고 한 문장으로만 답하세요.",
+        "시각장애인 보행 보조 테스트입니다. '소타 비전 연결 정상입니다.'라고 한 문장으로만 답하세요.",
       maxOutputTokens: 60,
     });
 
@@ -496,6 +496,6 @@ export class GeminiVisionAgent {
     if (prompt.includes("지하철") || prompt.includes("환승") || prompt.includes("승강장")) {
       return "온디바이스 지하철 모드: 스크린도어 호차-문번호(예: 3-2)와 환승 유도 표지판 화살표를 추적합니다.";
     }
-    return "루모 로컬 보조 모드가 활성화되어 있습니다. 전방 시야의 텍스트와 장애물을 분석합니다.";
+    return "소타 로컬 보조 모드가 활성화되어 있습니다. 전방 시야의 텍스트와 장애물을 분석합니다.";
   }
 }

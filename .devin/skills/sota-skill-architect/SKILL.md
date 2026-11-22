@@ -1,18 +1,18 @@
 ---
-name: lumo-skill-architect
-description: Design, generate, and audit general-purpose, zero-hardcoding Lumo Micro-Skills for visually impaired smart-glass use cases using 2-Tier Expert Playbooks, English-Core instructions, Temporal Slot Memory, and Physics-Aware View-Finding.
+name: sota-skill-architect
+description: Design, generate, and audit general-purpose, zero-hardcoding SOTA Micro-Skills for visually impaired smart-glass use cases using 2-Tier Expert Playbooks, English-Core instructions, Temporal Slot Memory, and Physics-Aware View-Finding.
 ---
 
-# Lumo Universal Skill Architect Skill
+# SOTA Universal Skill Architect Skill
 
-Use this skill whenever creating a new Use Case skill or auditing/refactoring existing skills in Lumo. Every skill MUST be general-purpose (usable by any person in any city/station/store without hardcoded dummy values) and follow the **2-Tier Expert Playbook + English-Core (`E2K`)** architecture.
+Use this skill whenever creating a new Use Case skill or auditing/refactoring existing skills in SOTA. Every skill MUST be general-purpose (usable by any person in any city/station/store without hardcoded dummy values) and follow the **2-Tier Expert Playbook + English-Core (`E2K`)** architecture.
 
 ## 1. Open-Source & Rehabilitation Foundations
 
-Every Lumo Micro-Skill synthesizes proven patterns from leading open-source multimodal AI systems and Orientation & Mobility (O&M) / Independent Living Skills (ILS) rehabilitation standards:
+Every SOTA Micro-Skill synthesizes proven patterns from leading open-source multimodal AI systems and Orientation & Mobility (O&M) / Independent Living Skills (ILS) rehabilitation standards:
 
 1. **2-Tier Routing vs. Deep Domain Playbook (inspired by `BasedHardware/omi` & `livekit/agents`)**:
-   - **Tier 1 (Lightweight Router Trigger — 1 line)**: Shown in the Global Scene Switch Directory when inactive (~10 tokens/skill) so Lumo can switch to any of the 16+ skills in a single frame without prompt bloat.
+   - **Tier 1 (Lightweight Router Trigger — 1 line)**: Shown in the Global Scene Switch Directory when inactive (~10 tokens/skill) so SOTA can switch to any of the 16+ skills in a single frame without prompt bloat.
    - **Tier 2 (`expertPlaybook` — injected ONLY when active)**: Provides deep O&M / ILS domain expertise (`visualScanChecklist`, `realLifeValueFormula`, `confounderAndSafetyGuards`, `physicalAimingGuide`) so the VLM delivers genuine daily-living value rather than shallow image captioning.
 2. **Zero-Hardcoding & Structured Failure Reason Contract (inspired by `OpenInterpreter/01` & MCP Tool Spec)**:
    - NEVER hardcode fallback entities (such as a specific station name, screen door `"5-3"`, or bus stop `"22-001"`). All target entities must come from observed slots, the 15-second `TemporalSlotCache`, or the active `MissionContext` / `LocalePack`.

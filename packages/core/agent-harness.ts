@@ -175,7 +175,7 @@ export interface SkillExpertPlaybook {
   physicalAimingGuide: string;
 }
 
-export interface LumoSkillPlugin {
+export interface SotaSkillPlugin {
   id: AutoDetectedSceneMode;
   labelKo: string;
   triggerDescriptionKo: string;
@@ -229,7 +229,7 @@ export function isValidObservedSlot(val?: string | null): boolean {
  * Content-Aware Scene Mode Classifier & Corrector (Fixes LUM-132, LUM-133, LUM-134):
  * Ensures that even if the VLM defaults to `[WALKING_SAFETY]` in AUTO mode while looking at
  * a refrigerator, orange juice bottle, medicine, dining plate, induction stove, or desk,
- * Lumo routes it to the exact domain Micro-Skill instead of treating indoor objects as walking hazards!
+ * SOTA routes it to the exact domain Micro-Skill instead of treating indoor objects as walking hazards!
  */
 export function isFullReadRequest(userQuery?: string): boolean {
   const q = (userQuery ?? "").trim();
@@ -244,9 +244,9 @@ export function inferOrCorrectSceneModeFromContent(
 ): AutoDetectedSceneMode {
   if (taggedMode === "NAV_CONTROL" || slots.navAction) return "NAV_CONTROL";
 
-  // LUM-143 & LUM-147: Handheld cards, access cards, books, supplements, or bottles must route to SMART_READER!
+  // LUM-143, LUM-147, & LUM-155: Handheld/tabletop food containers (e.g. '투게더 아이스크림 통'), cards, books, supplements, or bottles must route to SMART_READER!
   if (
-    /손에\s*(?:쥐고|들고)|출입카드|카드|출입증|신분증|유의사항|생활지원센터|관리사무소|책을\s*들고/.test(
+    /손에\s*(?:쥐고|들고)|출입카드|카드|출입증|신분증|유의사항|생활지원센터|관리사무소|책을\s*들고|샴푸|린스|컨디셔너|바디워시|세안제|로션|아이스크림|투게더|바닐라|요거트|과자|컵라면|통이\s*보이|통에\s*담겨|제품이고/.test(
       text,
     ) &&
     (taggedMode === "WALKING_SAFETY" || taggedMode === "RESTROOM_AND_SEAT")
@@ -398,7 +398,7 @@ const STAGE_LABELS: Record<number, string> = {
 };
 
 export class StatefulSkillHarness {
-  private readonly skills = new Map<AutoDetectedSceneMode, LumoSkillPlugin>();
+  private readonly skills = new Map<AutoDetectedSceneMode, SotaSkillPlugin>();
   private stickyMode: AutoDetectedSceneMode = "WALKING_SAFETY";
   private lastSpokenKorean = "";
   private activeMission: ActiveMissionState | null = null;
@@ -409,7 +409,7 @@ export class StatefulSkillHarness {
   >();
   private static readonly SLOT_TTL_MS = 15_000;
 
-  constructor(initialSkills: readonly LumoSkillPlugin[] = []) {
+  constructor(initialSkills: readonly SotaSkillPlugin[] = []) {
     for (const sk of initialSkills) {
       this.registerSkill(sk);
     }
@@ -462,11 +462,11 @@ export class StatefulSkillHarness {
     return this.conversationHistory;
   }
 
-  registerSkill(skill: LumoSkillPlugin): void {
+  registerSkill(skill: SotaSkillPlugin): void {
     this.skills.set(skill.id, skill);
   }
 
-  getRegisteredSkills(): LumoSkillPlugin[] {
+  getRegisteredSkills(): SotaSkillPlugin[] {
     return Array.from(this.skills.values());
   }
 
@@ -611,7 +611,7 @@ export class StatefulSkillHarness {
     const wantFullRead = isFullReadRequest(userQuery);
     const lines = [
       `[Layer 1: Context-Gated Micro-Skill Router | Sticky Mode: ${this.stickyMode} | Target Output Locale: ko-KR]`,
-      `You are 'Lumo', a warm, conversational AI smart-glass companion walking alongside a visually impaired user in Korea (Gemini Live / Pickle style).`,
+      `You are 'SOTA', a warm, conversational AI smart-glass companion walking alongside a visually impaired user in Korea (Gemini Live / Pickle style).`,
       wantFullRead
         ? `📖 [FULL VERBATIM READING MODE (LUM-147)]: The user explicitly requested reading ALL text completely! Override any 1-2 sentence brevity rule: output \`[SMART_READER | docType=전문낭독]\` first, then read EVERY visible line, bullet item, caution, and phone/card number from top to bottom without summarizing or skipping anything!`
         : `Output a single-pass header \`[MODE_ID | key=value]\` first, followed by 1-2 short, natural conversational Korean sentences (~해요, ~있어요, ~볼까요?, under 75 chars).`,
@@ -628,7 +628,7 @@ export class StatefulSkillHarness {
         `\n💬 [최근 사용자와의 대화 맥락 (티키타카 유지)]:`,
         ...this.conversationHistory
           .slice(-5)
-          .map((t) => `  - ${t.role === "user" ? "사용자" : "루모"}: "${t.text}"`),
+          .map((t) => `  - ${t.role === "user" ? "사용자" : "소타"}: "${t.text}"`),
       );
     }
 
@@ -673,6 +673,11 @@ export class StatefulSkillHarness {
     }
 
     if (userQuery?.trim()) {
+      if (/기억해|외워|저장해/.test(userQuery)) {
+        lines.push(
+          `\n📌 [USER COMMAND OVERRIDE — SAVE OBJECT LOCATION (LUM-152)]: The user explicitly asked to REMEMBER the location of the visible object (even if it is on the floor like a vacuum cleaner)! Do NOT output [WALKING_SAFETY] obstacle advice — output [INDOOR_SPACE | rememberedItem=<object>, itemLocation=<landmark_location>] and confirm saving its location!`,
+        );
+      }
       lines.push(`\n[사용자 음성/텍스트 요청]: ${userQuery.trim()}`);
     } else {
       lines.push(

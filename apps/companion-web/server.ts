@@ -71,7 +71,7 @@ export function createCompanionServer(feedbackStorePath?: string) {
           "GEMINI_API_KEY",
         );
         return sendJson(res, 200, {
-          app: "Lumo AI Smart Glass Companion (Korea PoC)",
+          app: "SOTA AI Smart Glass Companion (Korea PoC)",
           geminiKeychain: maskSecretMetadata(key),
           transitCoverage: transitProvider.getProviderStatus(),
           tmapKeychain: pedestrianNav.getTmapStatus(),
@@ -375,7 +375,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const server = createCompanionServer();
   server.listen(port, host, () => {
     console.log(
-      `Lumo Smart Glass Companion Server listening on http://127.0.0.1:${port} (LAN & Emulator 10.0.2.2:${port} enabled)`,
+      `SOTA Smart Glass Companion Server listening on http://127.0.0.1:${port} (LAN & Emulator 10.0.2.2:${port} enabled)`,
     );
   });
 }

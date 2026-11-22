@@ -4,7 +4,7 @@ import type {
   SpeechPriority,
 } from "../../packages/hardware-adapters/interfaces.ts";
 import { PriorityAudioArbiter } from "../../packages/core/audio-arbiter.ts";
-import { LumoOrchestrator } from "../../packages/core/orchestrator.ts";
+import { SotaOrchestrator } from "../../packages/core/orchestrator.ts";
 import { KOREAN_DAILY_SIMULATION_STEPS } from "../../packages/locale-ko-kr/index.ts";
 
 class ConsoleGlassAudioSink implements AudioSink {
@@ -34,7 +34,7 @@ export function runFullDaySimulation(): Array<{
 }> {
   const sink = new ConsoleGlassAudioSink();
   const arbiter = new PriorityAudioArbiter(sink);
-  const orchestrator = new LumoOrchestrator(arbiter);
+  const orchestrator = new SotaOrchestrator(arbiter);
 
   return KOREAN_DAILY_SIMULATION_STEPS.map((step) => {
     sink.lastEarcon = null;
@@ -58,11 +58,11 @@ export function runFullDaySimulation(): Array<{
 if (import.meta.url === `file://${process.argv[1]}`) {
   const logs = runFullDaySimulation();
   console.log("====================================================================");
-  console.log(" Lumo (Google AI Glass) - 한국 시각장애인 하루 일과 시뮬레이션 (UC-01 ~ UC-13)");
+  console.log(" SOTA (Google AI Glass) - 한국 시각장애인 하루 일과 시뮬레이션 (UC-01 ~ UC-13)");
   console.log("====================================================================\n");
   for (const entry of logs) {
     console.log(
-      `[${entry.time}] (${entry.useCaseId}) ${entry.title}\n  • Earcon/Priority : [${entry.earcon}] (${entry.priority})\n  • Lumo 음성 안내  : "${entry.spoken}"\n`,
+      `[${entry.time}] (${entry.useCaseId}) ${entry.title}\n  • Earcon/Priority : [${entry.earcon}] (${entry.priority})\n  • SOTA 음성 안내  : "${entry.spoken}"\n`,
     );
   }
 }

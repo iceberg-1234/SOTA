@@ -265,7 +265,7 @@ export async function runFullQaVerificationSuite(): Promise<{
     ],
   });
 
-  // QA-REG-07: LUMO-131 Context Gate Micro-Skill Isolation (16+ registered Micro-Skills, but <= 4 injected per prompt)
+  // QA-REG-07: SOTA-131 Context Gate Micro-Skill Isolation (16+ registered Micro-Skills, but <= 4 injected per prompt)
   const harness = new StatefulSkillHarness(createKoreanSkillPlugins());
   const totalRegisteredSkills = harness.getRegisteredSkills().length;
   const diningActiveIds = harness.getActiveCandidateSkillIds(
@@ -294,7 +294,7 @@ export async function runFullQaVerificationSuite(): Promise<{
   results.push({
     id: "QA-REG-07",
     category: "FIELD_REGRESSION",
-    title: "[회귀검증 LUMO-131] 16개 독립 Micro-Skill 분리 및 Context Gate(프롬프트당 최대 4개 스킬 마스킹) 간섭 0% 검증",
+    title: "[회귀검증 SOTA-131] 16개 독립 Micro-Skill 분리 및 Context Gate(프롬프트당 최대 4개 스킬 마스킹) 간섭 0% 검증",
     spokenOutput: `${reg07Check.naturalSpeech} (전체 등록 스킬: ${totalRegisteredSkills}개 -> 활성 주입: ${diningActiveIds.length}개 [${diningActiveIds.join("+")}])`,
     passed:
       reg07Check.passed &&
@@ -305,7 +305,7 @@ export async function runFullQaVerificationSuite(): Promise<{
       groceryActiveIds.includes("GROCERY_SCANNER"),
     failedGates: reg07Check.failedGates,
   });
-  // QA-REG-08: LUMO-132/133/134 Universal Skill Contract (15s TemporalSlotCache + UnreadableReason View-Finding + Manufactured Date Confounder Defense)
+  // QA-REG-08: SOTA-132/133/134 Universal Skill Contract (15s TemporalSlotCache + UnreadableReason View-Finding + Manufactured Date Confounder Defense)
   harness.clearTemporalSlotCache();
   // Frame 1 observes line & nextStation
   harness.mergeAndCacheTemporalSlots({ line: "2호선", nextStation: "교대" }, 1000);
@@ -335,7 +335,7 @@ export async function runFullQaVerificationSuite(): Promise<{
   results.push({
     id: "QA-REG-08",
     category: "FIELD_REGRESSION",
-    title: "[회귀검증 LUMO-132~134] 15초 시계열 슬롯 병합(TemporalSlotCache) + 손가락 가림 조준 코칭 + 제조일자/소비기한 혼동 방어",
+    title: "[회귀검증 SOTA-132~134] 15초 시계열 슬롯 병합(TemporalSlotCache) + 손가락 가림 조준 코칭 + 제조일자/소비기한 혼동 방어",
     spokenOutput: reg08Check.naturalSpeech,
     passed:
       reg08Check.passed &&
@@ -458,6 +458,55 @@ export async function runFullQaVerificationSuite(): Promise<{
         : ["MISSING_FULL_READ_OVERRIDE"],
   });
 
+  // QA-REG-14: LUM-148~152 Never treat '다시 읽어줘 / 유통기한 읽어줘' as place search, and enforce SAVE OBJECT LOCATION override for '위치 기억해 줘'
+  const cleanReadCmd = VisualPedestrianNavigator.extractCleanPlaceQuery(
+    "다시 우유 유통기한 읽어줘",
+  );
+  const saveLocPrompt = harness.assembleDynamicPrompt("위치 기억해 줘");
+  results.push({
+    id: "QA-REG-14",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 LUM-148~152] '유통기한 읽어줘' 길안내 오작동 원천 차단 및 '위치 기억해 줘' 시각 메모리 최우선 오버라이드 검증",
+    spokenOutput: `비장소 명령 추출 결과: "${cleanReadCmd}" | 위치기억 오버라이드 주입=${saveLocPrompt.includes("SAVE OBJECT LOCATION")}`,
+    passed:
+      !cleanReadCmd.includes("읽어") &&
+      saveLocPrompt.includes("SAVE OBJECT LOCATION"),
+    failedGates:
+      !cleanReadCmd.includes("읽어") &&
+      saveLocPrompt.includes("SAVE OBJECT LOCATION")
+        ? []
+        : ["READ_QUERY_LEAKED_TO_NAV"],
+  });
+
+  // QA-REG-15: LUM-153, 154, 155 ('투게더 아이스크림 통' WALKING_SAFETY 오분류 차단 + 존재하지 않는 날짜 '2026년 2월 29일' 환각 결정론적 차단 & 빙과류 제조일자 안내)
+  const iceCreamAuto = parseStructuredHarnessOutput(
+    "[WALKING_SAFETY] 투게더 아이스크림 통이 보이네요. 드시기 편하게 준비되어 있어요.",
+  );
+  const fakeLeapDateBlocked = await smartReaderSkill.executePostProcess!({
+    mode: "SMART_READER",
+    extractedSlots: {
+      product: "투게더 오리지널 바닐라",
+      expiryDate: "2026-02-29",
+    },
+    draftSpokenKorean:
+      "투게더 오리지널 바닐라 제품이고요, 소비기한은 2026년 2월 29일까지예요.",
+  });
+  results.push({
+    id: "QA-REG-15",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 LUM-153~155] '투게더 아이스크림 통' SMART_READER 자동 분류 및 허위 날짜('2026년 2월 29일') 결정론적 환각 차단·빙과류 제조일자 안내",
+    spokenOutput: `모드교정=${iceCreamAuto.mode} | 환각차단응답="${fakeLeapDateBlocked}"`,
+    passed:
+      iceCreamAuto.mode === "SMART_READER" &&
+      !fakeLeapDateBlocked.includes("2월 29일") &&
+      fakeLeapDateBlocked.includes("보이지 않아요"),
+    failedGates:
+      iceCreamAuto.mode === "SMART_READER" &&
+      !fakeLeapDateBlocked.includes("2월 29일")
+        ? []
+        : ["FAKE_DATE_NOT_BLOCKED"],
+  });
+
   const emartSearch = await nav.searchDestinationCandidates({
     query: "이마트",
     originLat: 37.5006,
@@ -544,7 +593,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const report = await runFullQaVerificationSuite();
   console.log("================================================================================");
   console.log(
-    ` 🧪 Lumo Real Use-Case & Field Regression QA Report (${report.passed}/${report.total} Passed)`,
+    ` 🧪 SOTA Real Use-Case & Field Regression QA Report (${report.passed}/${report.total} Passed)`,
   );
   console.log("================================================================================\n");
 

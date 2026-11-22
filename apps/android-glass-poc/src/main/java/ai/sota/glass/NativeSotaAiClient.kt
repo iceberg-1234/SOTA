@@ -1,4 +1,4 @@
-package ai.lumo.glass
+package ai.sota.glass
 
 import org.json.JSONArray
 import org.json.JSONObject
@@ -19,7 +19,7 @@ import java.time.temporal.ChronoUnit
  * - Fixes LUM-20/26/27/29: Persistent Top-Priority Mission Context + Pre-Departure Transit Card Check + Stage Progress + Live Seoul Bus/Subway Mapping.
  * - Fixes LUM-23: Movement-relative natural Korean directions ("지금 걸어가시는 정면 직진", "진행 방향 오른쪽/왼쪽") instead of "12시 방향".
  */
-object NativeLumoAiClient {
+object NativeSotaAiClient {
     const val CHEAPEST_FAST_MODEL = "gemini-3.5-flash-lite"
 
     private val INVALID_SLOTS = setOf(
@@ -47,7 +47,7 @@ object NativeLumoAiClient {
     @Synchronized
     private fun getRecentConversationLines(): List<String> {
         return conversationHistory.takeLast(5).map { (role, txt) ->
-            val speaker = if (role == "user") "사용자" else "루모"
+            val speaker = if (role == "user") "사용자" else "소타"
             "  - $speaker: \"$txt\""
         }
     }
@@ -233,9 +233,9 @@ object NativeLumoAiClient {
         SkillDefinition(
             id = "SMART_READER",
             labelKo = "냉장고/식품 소비기한 · 카드/약봉지/고지서 요약(UC-01,02,13)",
-            triggerDescriptionKo = "Refrigerator shelves, drink bottles/cartons, medicine/supplements, access cards/books/mail/bills (UC-01,02,13)",
-            extractionRulesKo = "`[SMART_READER | docType=소비기한|카드|약봉지|고지서, product=..., expiryDate=YYYY-MM-DD, dateType=EXPIRY|MANUFACTURED, unreadableReason=TOO_CLOSE_BLUR|OCCLUDED_BY_HAND|WRONG_SIDE]`",
-            expertPlaybookEn = "Scan: 1) Exact brand/product/card/book title, 2) For bottles/tubs: opened state & remaining amount, 3) Exact stamped `소비기한/유통기한` (separated from `제조일자`). Value Formula: State the actual date/numbers/text IMMEDIATELY — NEVER output hollow promises ('자세히 읽어드릴게요'), NEVER guess surface names ('상단/옆면') unless certain (LUM-145), and NEVER refuse with '이미 확인해 드렸어요' (LUM-143).",
+            triggerDescriptionKo = "Refrigerator shelves, food tubs/ice cream/drink bottles/cartons, medicine/supplements, access cards/books/mail/bills (UC-01,02,13)",
+            extractionRulesKo = "`[SMART_READER | docType=소비기한|카드|약봉지|고지서, product=..., stampedText=원문그대로또는NONE, expiryDate=YYYY-MM-DD|NONE, dateType=EXPIRY|MANUFACTURED, unreadableReason=WRONG_SIDE|TOO_CLOSE_BLUR|OCCLUDED_BY_HAND]`",
+            expertPlaybookEn = "Scan: 1) Exact brand/product/card/book title, 2) Opened state & remaining amount, 3) Exact ink-jet stamped characters (`stampedText`). CRITICAL ZERO-HALLUCINATION RULE FOR DATES (LUM-150~154): NEVER invent, guess, or fabricate a date (like '2026년 2월 29일' or '3월 30일')! Korean ice cream (`투게더`, 빙과류) usually has NO expiration date (`제조일자` only, stamped on bottom/rim). Unless you can literally read every digit of the stamped date in THIS image and copy it into `stampedText`, you MUST set `stampedText=NONE, expiryDate=NONE, unreadableReason=WRONG_SIDE` and say the date is not visible on this side!",
             relatedSkillIds = listOf("GROCERY_SCANNER", "INDOOR_SPACE"),
             earconKind = EarconKind.SCANNING_TICK
         ),
@@ -491,6 +491,18 @@ object NativeLumoAiClient {
         return activeSet.take(4).toSet()
     }
 
+    /**
+     * Validates that a YYYY-MM-DD string is a real Gregorian calendar date (e.g. rejects non-leap `2026-02-29` hallucinated in LUM-153/154!).
+     */
+    private fun isRealCalendarDateIso(isoDate: String): Boolean {
+        return try {
+            java.time.LocalDate.parse(isoDate.replace(".", "-"))
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun isFullReadRequest(userQuery: String): Boolean {
         val q = userQuery.trim()
         if (q.isEmpty()) return false
@@ -502,7 +514,7 @@ object NativeLumoAiClient {
         val wantFullRead = isFullReadRequest(userQuery)
         val sb = StringBuilder()
         sb.append("[Layer 1: Context-Gated Micro-Skill Router | Sticky Mode: $stickyModeTag | Target Output Locale: ko-KR]\n")
-        sb.append("You are 'Lumo', a warm, conversational AI smart-glass companion walking alongside a visually impaired user in Korea (Gemini Live / Pickle style).\n")
+        sb.append("You are 'SOTA', a warm, conversational AI smart-glass companion walking alongside a visually impaired user in Korea (Gemini Live / Pickle style).\n")
         if (wantFullRead) {
             sb.append("📖 [FULL VERBATIM READING MODE (LUM-147)]: The user explicitly asked to read ALL visible text completely! Override any brevity/sentence limit: output `[SMART_READER | docType=전문낭독]` first, then read EVERY visible line, bullet point, caution note, and phone/card number from top to bottom without summarizing or omitting anything!\n")
         } else {
@@ -513,7 +525,10 @@ object NativeLumoAiClient {
         sb.append("2. [Indoor Dead-End vs Desk Work vs Subway Train]: ONLY when an Active Navigation Mission is set, if a desk/window/wall blocks the front, tell the user to turn around toward the door. When NO navigation mission is active (`activeMissionGoal` empty), sitting at a desk/laptop is normal — NEVER tell them to turn around and walk to the door (LUM-141)! Inside a subway train (`SUBWAY_ON_BOARD`), standing by the door window is safe.\n")
         sb.append("3. [Movement-Relative & Tactile Only]: Never use clock-face jargon ('12시 방향') or color-only path instructions ('밝은 색 보도'). Use movement-relative Korean ('지금 걸어가시는 방향 그대로', '오른쪽으로 살짝') and tactile cues (점자블록, 보도턱, 난간) with step counts.\n")
         sb.append("4. [Elevator Exit Floor Priority]: On elevator panels during an outing, check if the 1st/Lobby floor button is lit BEFORE open/close buttons.\n")
-        sb.append("5. [Direct Answer & Zero Guessing (LUM-143, 145)]: NEVER say '이미 확인해 드렸어요' or '읽어드릴게요' without stating the actual content/date right away. Do NOT guess whether a label is on the '상단' or '옆면' — just state the product name and exact date (`소비기한 YYYY년 M월 D일까지`).\n")
+        sb.append("5. [ZERO DATE HALLUCINATION (LUM-150, 151)]: NEVER fabricate or guess an expiration date when the ink-jet stamped date digits are not physically legible in the current image! If the user shows the side/front of a milk carton or bottle where no date is stamped, output `[SMART_READER | expiryDate=NONE, unreadableReason=WRONG_SIDE]` and ask them to tilt the top seam or rotate the container.\n")
+        if (Regex("기억해|외워|저장해").containsMatchIn(userQuery)) {
+            sb.append("📌 [USER COMMAND OVERRIDE — SAVE OBJECT LOCATION (LUM-152)]: The user explicitly asked you to REMEMBER the location of the visible object (even if it is on the floor like a vacuum cleaner, bag, or shoes)! Do NOT output `[WALKING_SAFETY]` obstacle-avoidance advice! You MUST output `[INDOOR_SPACE | rememberedItem=<object>, itemLocation=<landmark_location>]` and confirm in Korean that you saved its location!\n")
+        }
         sb.append("6. [CRITICAL SCENE CLASSIFICATION IN AUTO MODE (LUM-132~134)]: Do NOT default to `[WALKING_SAFETY]` for indoor or household scenes! When the camera shows a refrigerator, beverage bottle (e.g. orange juice, milk), side-dish container, medicine pouch, or bill, ALWAYS select `[SMART_READER]` or `[GROCERY_SCANNER]` and read the product/contents/expiration date — NEVER tell the user to 'dodge the refrigerator door and walk past it'!\n")
 
         val historyLines = getRecentConversationLines()
@@ -551,7 +566,7 @@ object NativeLumoAiClient {
             .joinToString(", ") { id -> "[$id](${SKILLS.getValue(id).labelKo.substringBefore("(")})" }
         sb.append("$switchTags\n")
         if (!previousSpeech.isNullOrBlank() && userQuery.isBlank()) {
-            sb.append("\n(Previous Lumo speech: \"$previousSpeech\" — If the camera scene is unchanged, do NOT invent a state jump; keep consistent station/waiting guidance.)\n")
+            sb.append("\n(Previous SOTA speech: \"$previousSpeech\" — If the camera scene is unchanged, do NOT invent a state jump; keep consistent station/waiting guidance.)\n")
         }
         if (userQuery.isNotBlank()) {
             val pendingCands = WayfindingNavigator.lastSearchResult?.candidatesRecommended?.take(4)?.joinToString(", ") { "${it.index}번:${it.name}" } ?: "없음"
@@ -598,8 +613,8 @@ object NativeLumoAiClient {
         val slots = mergeAndCacheTemporalSlots(rawExtractedSlots)
         val bodyText = match?.groupValues?.get(3)?.trim()?.takeIf { it.isNotEmpty() } ?: cleaned
 
-        // Layer 2 Content-Aware Mode Corrector (Fixes LUM-132~134 & LUM-143/147 handheld cards/books):
-        val isHandheldReadingItem = Regex("손에\\s*(?:쥐고|들고)|출입카드|카드|출입증|신분증|유의사항|생활지원센터|관리사무소|표지에|책을\\s*들고|냉장고|주스|오렌지|우유|두부|반찬통|유통기한|소비기한|제조일자|약봉지|안약|점안액|영양제|엽산|유산균|고지서|택배|송장", RegexOption.IGNORE_CASE).containsMatchIn(bodyText)
+        // Layer 2 Content-Aware Mode Corrector (Fixes LUM-132~134, LUM-143/147, & LUM-155 ice cream / food containers / indoor items):
+        val isHandheldReadingItem = Regex("손에\\s*(?:쥐고|들고)|출입카드|카드|출입증|신분증|유의사항|생활지원센터|관리사무소|표지에|책을\\s*들고|샴푸|린스|컨디셔너|바디워시|세안제|로션|냉장고|아이스크림|투게더|바닐라|요거트|과자|빵|컵라면|라면|음료|주스|오렌지|우유|두부|반찬통|식품|제품이고|통이\\s*보이|통에\\s*담겨|유통기한|소비기한|제조일자|약봉지|안약|점안액|영양제|엽산|유산균|고지서|택배|송장", RegexOption.IGNORE_CASE).containsMatchIn(bodyText)
         val modeId = if (isHandheldReadingItem && rawModeId in setOf("WALKING_SAFETY", "RESTROOM_AND_SEAT")) {
             "SMART_READER"
         } else if (rawModeId == "WALKING_SAFETY") {
@@ -692,14 +707,33 @@ object NativeLumoAiClient {
             }
         }
 
-        // Layer 2 Real-Date Food Expiry D-Day Calculator & Confounder Defense for SMART_READER (UC-02)
+        // Layer 2 Real-Date Food Expiry D-Day Calculator & Anti-Hallucination Guard for SMART_READER (UC-02, LUM-150~154)
         if (skill.id == "SMART_READER") {
-            if (isValidSlot(slots["unreadableReason"])) {
-                return Triple(skill, coachPhysicalViewFindingKo(slots["unreadableReason"], "HANDHELD_ITEM"), slots)
+            val prod = rawExtractedSlots["product"]?.takeIf { isValidSlot(it) } ?: slots["product"]?.takeIf { isValidSlot(it) } ?: "제품"
+            val stampedRaw = rawExtractedSlots["stampedText"]?.takeIf { isValidSlot(it) }
+            val expRaw = rawExtractedSlots["expiryDate"]?.takeIf { isValidSlot(it) }
+            val dateType = (rawExtractedSlots["dateType"] ?: "EXPIRY").uppercase()
+
+            // Deterministic Hallucination Blocker #1: Reject impossible calendar dates (e.g. `2026-02-29` or `2026년 2월 29일` in LUM-153/154!)
+            val bodyIsoCheck = Regex("(20\\d{2})\\s*년\\s*(\\d{1,2})\\s*월\\s*(\\d{1,2})\\s*일").find(draftSpeech)?.let { m ->
+                "%04d-%02d-%02d".format(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt())
             }
-            val expRaw = slots["expiryDate"] ?: Regex("(20\\d{2}[-.]\\d{2}[-.]\\d{2})").find(draftSpeech)?.groupValues?.get(1)
-            val prod = slots["product"]?.takeIf { isValidSlot(it) } ?: "식품"
-            val dateType = (slots["dateType"] ?: "EXPIRY").uppercase()
+            if ((expRaw != null && Regex("^\\d{4}[-.]\\d{2}[-.]\\d{2}$").matches(expRaw) && !isRealCalendarDateIso(expRaw)) ||
+                (bodyIsoCheck != null && !isRealCalendarDateIso(bodyIsoCheck)) ||
+                (bodyIsoCheck != null && expRaw == null && stampedRaw == null)
+            ) {
+                val isIceCream = Regex("투게더|아이스크림|빙과").containsMatchIn("$prod $draftSpeech")
+                val msg = if (isIceCream) {
+                    "$prod 제품이에요. 지금 비추신 면에는 날짜가 보이지 않아요. 아이스크림은 주로 뚜껑 테두리나 바닥 면에 제조일자가 찍혀 있으니 용기 아래쪽을 비춰 보실래요?"
+                } else {
+                    "$prod 제품이지만 지금 각도에서는 소비기한 숫자가 선명하게 보이지 않아요. 용기 위쪽이나 옆면을 천천히 돌려 비춰 보실래요?"
+                }
+                return Triple(skill, msg, slots)
+            }
+
+            if (isValidSlot(rawExtractedSlots["unreadableReason"])) {
+                return Triple(skill, coachPhysicalViewFindingKo(rawExtractedSlots["unreadableReason"], "HANDHELD_ITEM"), slots)
+            }
             if (dateType == "MANUFACTURED" && expRaw != null) {
                 return Triple(skill, "$prod 제조일자가 $expRaw 로 적혀 있어요. 소비기한은 용기 다른 면에 적혀 있으니 천천히 반 바퀴 돌려 비춰 보실래요?", slots)
             }
@@ -823,7 +857,7 @@ object NativeLumoAiClient {
                 "generationConfig",
                 JSONObject()
                     .put("temperature", 0.15)
-                    .put("maxOutputTokens", if (wantFullRead) 650 else 160)
+                    .put("maxOutputTokens", if (wantFullRead) 650 else 220)
                     .put("thinkingConfig", JSONObject().put("thinkingLevel", "MINIMAL"))
             )
             .toString()

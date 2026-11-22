@@ -1,7 +1,7 @@
 import {
   coachPhysicalViewFindingKo,
   isValidObservedSlot,
-  type LumoSkillPlugin,
+  type SotaSkillPlugin,
 } from "../core/agent-harness.ts";
 import { KoreanSmartReader } from "../core/smart-reader.ts";
 import { coachFingertipToButtonKo } from "../core/spatial-language.ts";
@@ -21,14 +21,14 @@ const runtimeVisualMemory = new Map<string, string>([
 ]);
 
 /**
- * Universal 2-Tier Micro-Skill Registry (built with `/lumo-skill-architect`):
+ * Universal 2-Tier Micro-Skill Registry (built with `/sota-skill-architect`):
  * - Tier 1: 1-line `triggerDescriptionKo` for zero-lag scene switching across all 16 skills.
  * - Tier 2: Rich 4-part `expertPlaybook` (Visual Scan Order, Real-Life Value Formula, Confounder Guards, Physical Aiming Guide)
  *   injected ONLY for active Context-Gated skills to deliver authentic O&M and Independent Living Skills (ILS) value.
  */
 export function createKoreanSkillPlugins(
   transitProvider = new KoreaTransitProvider(),
-): readonly LumoSkillPlugin[] {
+): readonly SotaSkillPlugin[] {
   return [
     {
       id: "WALKING_SAFETY",
@@ -419,7 +419,7 @@ export function createKoreanSkillPlugins(
           "On apartment touch keypads, verify exact digit alignment before telling the user to press so they never ring the wrong neighbor",
         ],
         physicalAimingGuide:
-          "Stand an arm's length from the screen and place one finger lightly on the outer bezel edge so Lumo can see both the screen and your finger.",
+          "Stand an arm's length from the screen and place one finger lightly on the outer bezel edge so SOTA can see both the screen and your finger.",
       },
       relatedSkillIds: ["INDOOR_SPACE", "APPLIANCE_SAFETY"],
       priority: "P1_NAVIGATION",
@@ -497,8 +497,9 @@ export function createKoreanSkillPlugins(
         realLifeValueFormula:
           "NO shallow captioning ('주스 병이 보이네요')! Deliver: [Exact Product/Med Name & Dosage/Flavor] + [Opened/Remaining amount if container] + [Expiry D-Day OR exact part of bottle/box to rotate if date is hidden]",
         confounderAndSafetyGuards: [
-          "CRITICAL: Distinguish eyedrops (점안액) from superglue/nail drops/external lotion, and distinguish `dateType=EXPIRY` (소비기한) from `dateType=MANUFACTURED` (제조일자)",
-          "If mail is an ad flyer, say '광고 전단지예요' in one short sentence instead of reading marketing text",
+          "CRITICAL ZERO-HALLUCINATION FOR DATES (LUM-150, 151): NEVER fabricate or guess an expiration date when the ink-jet stamped date digits are not physically visible in this exact frame! Side nutrition tables (mg/ml/%) are NOT expiration dates — if the date stamp is not visible, emit `expiryDate=NONE, unreadableReason=WRONG_SIDE` and coach rotating the top gable/cap neck",
+          "Distinguish eyedrops (점안액) from superglue/external lotion, and distinguish `dateType=EXPIRY` (소비기한) from `dateType=MANUFACTURED` (제조일자)",
+          "If mail is an ad flyer, say '광고 전단지예요' in one short sentence",
         ],
         physicalAimingGuide:
           "For PET bottles, slowly rotate the upper bottle neck under the cap; for milk cartons, tilt the top roof seam; for tubs, show the lid or bottom.",
@@ -515,6 +516,37 @@ export function createKoreanSkillPlugins(
         }
         const expiryDate = obs.extractedSlots.expiryDate;
         const product = obs.extractedSlots.product;
+        // LUM-153 & LUM-154: Reject impossible Gregorian dates (e.g. non-leap `2026-02-29`!) or unverified date claims in body text
+        const isValidRealIsoDate = (iso: string): boolean => {
+          const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+          if (!m) return false;
+          const y = Number(m[1]);
+          const mo = Number(m[2]);
+          const d = Number(m[3]);
+          const dt = new Date(Date.UTC(y, mo - 1, d));
+          return (
+            dt.getUTCFullYear() === y &&
+            dt.getUTCMonth() === mo - 1 &&
+            dt.getUTCDate() === d
+          );
+        };
+        const bodyDateMatch = /(20\d{2})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/.exec(
+          obs.draftSpokenKorean,
+        );
+        const bodyIso = bodyDateMatch
+          ? `${bodyDateMatch[1]}-${bodyDateMatch[2].padStart(2, "0")}-${bodyDateMatch[3].padStart(2, "0")}`
+          : null;
+        if (
+          (isValidObservedSlot(expiryDate) && !isValidRealIsoDate(expiryDate!)) ||
+          (bodyIso && (!isValidRealIsoDate(bodyIso) || !isValidObservedSlot(expiryDate)))
+        ) {
+          const isIceCream = /투게더|아이스크림|빙과/.test(
+            `${product ?? ""} ${obs.draftSpokenKorean}`,
+          );
+          return isIceCream
+            ? `${product || "아이스크림"} 제품이에요. 지금 비추신 면에는 날짜가 보이지 않아요. 아이스크림은 주로 뚜껑 테두리나 바닥 면에 제조일자가 찍혀 있으니 용기 아래쪽을 비춰 보실래요?`
+            : `${product || "제품"}이지만 지금 각도에서는 소비기한 숫자가 선명하게 보이지 않아요. 용기 위쪽이나 옆면을 천천히 돌려 비춰 보실래요?`;
+        }
         const dateType = (obs.extractedSlots.dateType || "EXPIRY").toUpperCase();
         if (dateType === "MANUFACTURED") {
           return `${product || "상품"}의 제조일자가 ${expiryDate}로 적혀 있어요. 소비기한은 용기 옆면이나 병목 위쪽에 따로 적혀 있으니 살짝 돌려 비춰 보실래요?`;

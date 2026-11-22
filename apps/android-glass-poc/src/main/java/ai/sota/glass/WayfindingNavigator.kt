@@ -1,4 +1,4 @@
-package ai.lumo.glass
+package ai.sota.glass
 
 import org.json.JSONArray
 import org.json.JSONObject
@@ -318,7 +318,8 @@ object WayfindingNavigator {
         "도보", "도보로", "걸어서", "노선", "노선도", "경로", "코스", "코스로", "타고", "타는",
         "탄다고", "탈래", "안", "타고싶어", "가고싶어", "가자", "갈래", "가는", "길", "길찾기",
         "검색", "검색해", "검색해줘", "찾아", "찾아줘", "찾아봐", "안내", "안내해", "안내해줘", "알려줘", "다시", "짜줘",
-        "루모", "루모야", "지금", "여기서", "나", "내", "제일", "가장"
+        "읽어", "읽어줘", "봐줘", "보여줘", "유통기한", "소비기한", "기억", "기억해", "기억해줘", "위치", "설명", "설명해줘",
+        "소타", "소타야", "지금", "여기서", "나", "내", "제일", "가장"
     )
 
     fun tokenizePlaceQuery(rawInput: String): List<String> {
@@ -839,7 +840,7 @@ object WayfindingNavigator {
     fun activateConfirmedRoute(): String {
         val route = activeRoute ?: return "먼저 목적지를 검색해 주세요."
         route.isConfirmedByUser = true
-        NativeLumoAiClient.startOrClearMission("${route.destination.shortAddressKo} (${route.macroPlanOverviewKo})")
+        NativeSotaAiClient.startOrClearMission("${route.destination.shortAddressKo} (${route.macroPlanOverviewKo})")
         val firstInstr = route.turnSteps.first().instructionKo.replace(Regex("\\([^)]*\\)"), "").trim()
         return "좋아요, ${route.destination.name} 안내를 지금부터 시작할게요! 교통카드는 챙기셨죠? 우선 첫 번째 구간으로 $firstInstr 해 볼까요?"
     }

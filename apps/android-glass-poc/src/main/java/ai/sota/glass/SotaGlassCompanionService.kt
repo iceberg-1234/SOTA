@@ -1,4 +1,4 @@
-package ai.lumo.glass
+package ai.sota.glass
 
 import android.app.Service
 import android.content.Intent
@@ -11,7 +11,7 @@ import java.util.Locale
  * Operates hands-free via 1st-person camera stream, bone-conduction audio, and temple tap gestures
  * without requiring AccessibilityService permissions.
  */
-class LumoGlassCompanionService : Service(), TextToSpeech.OnInitListener {
+class SotaGlassCompanionService : Service(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
 
     override fun onCreate() {
@@ -23,13 +23,13 @@ class LumoGlassCompanionService : Service(), TextToSpeech.OnInitListener {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.KOREAN
             tts?.setSpeechRate(1.15f)
-            speakPriority("루모가 시작되었습니다. 도움이 필요하면 언제든 말씀하거나 안경다리를 탭하세요.", flush = true)
+            speakPriority("소타가 시작되었습니다. 도움이 필요하면 언제든 말씀하거나 안경다리를 탭하세요.", flush = true)
         }
     }
 
     fun speakPriority(utterance: String, flush: Boolean) {
         val queueMode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-        tts?.speak(utterance, queueMode, null, "lumo_utterance_${System.currentTimeMillis()}")
+        tts?.speak(utterance, queueMode, null, "sota_utterance_${System.currentTimeMillis()}")
     }
 
     fun onBargeInGesture() {
