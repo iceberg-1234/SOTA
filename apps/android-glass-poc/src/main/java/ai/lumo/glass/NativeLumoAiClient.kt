@@ -502,15 +502,13 @@ object NativeLumoAiClient {
         sb.append("\n[Active Candidate Micro-Skills (Detailed Rules)]:\n")
         for ((id, sk) in SKILLS) {
             if (id in activeIds || id == "SUBWAY_ON_BOARD") {
-                sb.append("• [$id] (${sk.labelKo}): ${sk.triggerDescriptionKo}\n  - Rule: ${sk.extractionRulesKo}\n")
+                sb.append("• [$id]: ${sk.extractionRulesKo}\n")
             }
         }
-        sb.append("\n[Global Scene Switch Directory — Immediately switch to any of these [MODE_ID]s when visible!]:\n")
-        for ((id, sk) in SKILLS) {
-            if (id !in activeIds && id != "SUBWAY_ON_BOARD" && id != "NAV_CONTROL") {
-                sb.append("• [$id] (${sk.labelKo}): ${sk.triggerDescriptionKo}\n")
-            }
-        }
+        sb.append("\n[Scene Switch Directory — Switch [MODE_ID] immediately when visible]: ")
+        val switchTags = SKILLS.keys.filter { it !in activeIds && it != "SUBWAY_ON_BOARD" && it != "NAV_CONTROL" }
+            .joinToString(", ") { id -> "[$id](${SKILLS.getValue(id).labelKo.substringBefore("(")})" }
+        sb.append("$switchTags\n")
         if (!previousSpeech.isNullOrBlank() && userQuery.isBlank()) {
             sb.append("\n(Previous Lumo speech: \"$previousSpeech\" — If the camera scene is unchanged, do NOT invent a state jump; keep consistent station/waiting guidance.)\n")
         }
@@ -781,7 +779,7 @@ object NativeLumoAiClient {
                 "generationConfig",
                 JSONObject()
                     .put("temperature", 0.2)
-                    .put("maxOutputTokens", 160)
+                    .put("maxOutputTokens", 95)
             )
             .toString()
 
@@ -791,8 +789,8 @@ object NativeLumoAiClient {
             try {
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 10000
-                    readTimeout = 18000
+                    connectTimeout = 5000
+                    readTimeout = 7500
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 }

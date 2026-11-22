@@ -152,26 +152,25 @@ object FeedbackLogStore {
     private fun persistToDisk(context: Context) {
         try {
             val file = File(context.filesDir, FILE_NAME)
-            file.writeText(toJsonArray().toString(2), Charsets.UTF_8)
+            file.writeText(toJsonArray().toString(), Charsets.UTF_8)
         } catch (_: Exception) {}
     }
 
     /**
-     * Best-effort background sync to local Mac companion server when connected via USB (`127.0.0.1:4310`) or Wi-Fi (`BuildConfig.DEV_LAN_URL`).
+     * Best-effort background sync to local Mac companion server when connected via USB (`127.0.0.1:4310`).
      */
     fun trySyncToServerAsync(context: Context) {
         ensureLoaded(context)
         val payload = JSONObject().put("records", toJsonArray()).toString()
         val urls = listOf(
-            "http://127.0.0.1:4310/api/feedback/sync",
-            "${BuildConfig.DEV_LAN_URL}/api/feedback/sync"
+            "http://127.0.0.1:4310/api/feedback/sync"
         )
         for (u in urls) {
             try {
                 val conn = (URL(u).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 1500
-                    readTimeout = 2000
+                    connectTimeout = 800
+                    readTimeout = 1200
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 }

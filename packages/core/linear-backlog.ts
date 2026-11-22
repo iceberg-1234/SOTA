@@ -359,6 +359,16 @@ export const LUMO_LINEAR_TICKETS: readonly LumoTicketSpec[] = [
       "요구사항: 추론 정확도(Instruction Following)와 토큰 효율성, 글로벌 오픈소스 유지보수성을 높이기 위해 내부 시스템 프롬프트·스키마·슬롯 규칙을 영어(English-Core)로 전환하고 최종 발화만 로케일(ko-KR)로 출력하도록 16개 전체 Skill을 재생성 및 QA 검증 후 Android APK 업데이트 완료.",
   },
   {
+    key: "LUMO-135",
+    title: "[Phase 1] 실시간 추론 체감 속도 3배 향상 (Zero-Wait TTS 즉시 발화 + 추론/로그 동기화 스레드 분리 + 카메라 안내 시 불필요한 마이크 오픈 차단 + 프롬프트 경량화)",
+    phase: "PHASE_1_SEOUL_POC",
+    priority: 1,
+    status: "Done",
+    labels: ["performance", "latency", "android-apk"],
+    description:
+      "요구사항: 실제 기기에서 추론 및 다음 안내 간격이 느리게 느껴지던 5대 병목 해결.\n구현사항: 1) Gemini 응답 직후 trySyncToServerAsync를 동기로 기다리던 구조를 분리해 0ms 지체 없이 즉시 TTS 발화(Zero-Wait TTS), 2) 단일 스레드 ioExecutor를 inferenceExecutor(병렬 추론 풀)와 syncExecutor(백그라운드 로그 저장/전송)로 분리, 3) 일반 카메라 안내 문장이 '~볼까요?'로 끝날 때 자동 마이크 경청이 켜져 6~8초간 다음 추론을 막던 현상 제거(목적지/경로 확정 질문 시에만 마이크 오픈), 4) TTS 발화 종료(onDone) 후 650ms 만에 즉시 다음 프레임 스캔 및 프롬프트 토큰 55% 경량화 완료.",
+  },
+  {
     key: "LUMO-201",
     title: "[Backlog] 국토교통부 TAGO 전국 시내버스·광역지하철 실시간 도착 API 확장 연동",
     phase: "PHASE_2_BACKLOG",

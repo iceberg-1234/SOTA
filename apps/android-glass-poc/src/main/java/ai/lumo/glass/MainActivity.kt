@@ -151,7 +151,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         )
     )
 
-    private val ioExecutor = Executors.newSingleThreadExecutor()
+    private val ioExecutor = Executors.newCachedThreadPool()
+    private val syncExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
@@ -166,7 +167,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
 
     companion object {
         private const val REQ_PERMS = 1001
-        private const val REALTIME_INTERVAL_MS = 4200L
+        private const val REALTIME_INTERVAL_MS = 1800L
     }
 
     private val gpsListener = object : LocationListener {
@@ -467,7 +468,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         setContentView(root)
 
         renderHistoryList()
-        ioExecutor.execute { FeedbackLogStore.trySyncToServerAsync(this) }
+        syncExecutor.execute { FeedbackLogStore.trySyncToServerAsync(this) }
     }
 
     private fun renderUseCaseCategoryTabsAndChips() {
@@ -548,9 +549,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             spokenKorean = displaySpoken,
             latencyMs = latencyMs
         )
-        val saved = FeedbackLogStore.addEntry(this, replyObj, frameB64)
-        FeedbackLogStore.trySyncToServerAsync(this)
-        prependEntryCard(saved)
+        syncExecutor.execute {
+            val saved = FeedbackLogStore.addEntry(this, replyObj, frameB64)
+            runOnUiThread {
+                prependEntryCard(saved)
+            }
+            FeedbackLogStore.trySyncToServerAsync(this)
+        }
     }
 
     private fun searchDestinationAndPromptUser(query: String) {
@@ -576,7 +581,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             runOnUiThread {
                 renderSearchCandidateConfirmationUi(query, searchRes, sortByDistance = false)
                 SpatialEarconSynthesizer.play(EarconKind.TARGET_FOUND)
-                speakNative(searchRes.spokenConfirmationPromptKo)
+                speakNative(searchRes.spokenConfirmationPromptKo, autoListenAfter = true)
                 logDialogueTurnAsFeedbackCard(
                     modeTag = "DESTINATION_SEARCH",
                     modeLabelKo = "목적지 후보 검색 (${searchRes.candidatesRecommended.size}건)",
@@ -768,7 +773,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             runOnUiThread {
                 renderMacroPlanConfirmationUi(route, preferTransit, preferSubwayOnly)
                 SpatialEarconSynthesizer.play(EarconKind.TARGET_FOUND)
-                speakNative(finalSpeech)
+                speakNative(finalSpeech, autoListenAfter = true)
                 logDialogueTurnAsFeedbackCard(
                     modeTag = "MACRO_ROUTE_PLAN",
                     modeLabelKo = "전체 이동 계획 브리핑 ($modeStr)",
@@ -964,7 +969,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             latencyMs = 50L
         )
         mainHandler.removeCallbacks(realtimeLoopRunnable)
-        mainHandler.postDelayed(realtimeLoopRunnable, 5500L)
+        mainHandler.postDelayed(realtimeLoopRunnable, 1200L)
     }
 
     private fun updateActiveNavBannerUi() {
@@ -1293,10 +1298,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
 
     private fun grabCurrentCameraFrame(): CapturedFrameResult {
         if (!cameraTextureView.isAvailable) return CapturedFrameResult(null, false, false, false)
-        val bmp: Bitmap = cameraTextureView.getBitmap(384, 288) ?: return CapturedFrameResult(null, false, false, false)
+        val bmp: Bitmap = cameraTextureView.getBitmap(320, 240) ?: return CapturedFrameResult(null, false, false, false)
         val (tooDark, lowLight, highGlare) = analyzeFrameLuminance(bmp)
         val baos = ByteArrayOutputStream()
-        bmp.compress(Bitmap.CompressFormat.JPEG, 60, baos)
+        bmp.compress(Bitmap.CompressFormat.JPEG, 52, baos)
         val b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
         return CapturedFrameResult(b64, tooDark, lowLight, highGlare)
     }
@@ -1341,13 +1346,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                 imageBase64Jpeg = captured.base64Jpeg,
                 previousSpeech = lastSpokenText
             )
-            val savedEntry = FeedbackLogStore.addEntry(
-                context = this,
-                reply = reply,
-                imageBase64 = captured.base64Jpeg
-            )
-            FeedbackLogStore.trySyncToServerAsync(this)
 
+            // Zero-Wait TTS: Speak and update UI IMMEDIATELY on main thread before disk write or server sync!
             runOnUiThread {
                 requestInFlight = false
                 lastSpokenText = reply.spokenKorean
@@ -1357,7 +1357,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                     val activeRt = WayfindingNavigator.activeRoute
                     val lastSearch = WayfindingNavigator.lastSearchResult
                     val targetDest = activeRt?.destination ?: lastSearch?.candidatesRecommended?.firstOrNull()
-                    val originAddr = activeRt?.originAddressKo ?: lastSearch?.originAddressKo ?: WayfindingNavigator.reverseGeocodeOrigin(WayfindingNavigator.currentLat, WayfindingNavigator.currentLng)
+                    val originAddr = activeRt?.originAddressKo ?: lastSearch?.originAddressKo ?: "현재 위치"
                     val oLat = activeRt?.originLat ?: lastSearch?.originLat ?: WayfindingNavigator.currentLat
                     val oLng = activeRt?.originLng ?: lastSearch?.originLng ?: WayfindingNavigator.currentLng
 
@@ -1407,9 +1407,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
 
                 if (aiEnabled || userQuery.isNotBlank()) {
                     SpatialEarconSynthesizer.play(reply.earconKind)
-                    speakNative(reply.spokenKorean)
+                    speakNative(reply.spokenKorean, autoListenAfter = false)
                 }
-                prependEntryCard(savedEntry)
+            }
+
+            // Persist and sync asynchronously on low-priority syncExecutor so it NEVER delays speech or next inference!
+            syncExecutor.execute {
+                val savedEntry = FeedbackLogStore.addEntry(
+                    context = this,
+                    reply = reply,
+                    imageBase64 = captured.base64Jpeg
+                )
+                runOnUiThread {
+                    prependEntryCard(savedEntry)
+                }
+                FeedbackLogStore.trySyncToServerAsync(this)
             }
         }
     }
@@ -1620,7 +1632,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
     }
 
     private fun saveEntryFeedbackAsync(entry: InferenceFeedbackEntry) {
-        ioExecutor.execute {
+        syncExecutor.execute {
             FeedbackLogStore.updateFeedback(
                 context = this,
                 id = entry.id,
@@ -1728,10 +1740,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
                 override fun onDone(utteranceId: String?) {
-                    // When Lumo finishes asking a question (e.g. "어디로 안내해 드릴까요?", "출발할까요?"),
-                    // automatically open the inline microphone for hands-free conversational reply!
+                    // Only auto-open inline microphone for explicit Planning / Route Confirmation questions!
                     if (utteranceId?.startsWith("lumo_question_") == true) {
                         mainHandler.postDelayed({ startInlineVoiceListening() }, 250L)
+                    } else if (aiEnabled) {
+                        // Event-driven next frame trigger: scan next camera frame 650ms after TTS finishes speaking!
+                        mainHandler.removeCallbacks(realtimeLoopRunnable)
+                        mainHandler.postDelayed(realtimeLoopRunnable, 650L)
                     }
                 }
                 override fun onError(utteranceId: String?) {}
@@ -1739,10 +1754,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
     }
 
-    private fun speakNative(text: String) {
+    private fun speakNative(text: String, autoListenAfter: Boolean = false) {
         val naturalSpeech = NativeLumoAiClient.cleanMovementRelativeDirection(text)
-        val isQuestion = naturalSpeech.endsWith("?") || naturalSpeech.endsWith("까요") || naturalSpeech.endsWith("래요")
-        val utterId = if (isQuestion) {
+        val utterId = if (autoListenAfter) {
             "lumo_question_${System.currentTimeMillis()}"
         } else {
             "lumo_native_${System.currentTimeMillis()}"
@@ -1759,6 +1773,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         tts?.stop()
         tts?.shutdown()
         ioExecutor.shutdownNow()
+        syncExecutor.shutdownNow()
         super.onDestroy()
     }
 }
