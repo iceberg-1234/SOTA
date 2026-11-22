@@ -10,6 +10,10 @@ build/
 .env.*
 !.env.example
 .devin/*.local.json
+.devin/mcp_config.json
+.devin/skills/feedback-triage/
+packages/core/linear-backlog.ts
+apps/android-glass-poc/triage-feedback.ts
 feedback-logs/
 ONE_PAGER.md
 PRD.md

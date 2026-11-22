@@ -23,12 +23,6 @@ import { createKoreanSkillPlugins } from "../../packages/locale-ko-kr/skills.ts"
 import { StatefulSkillHarness } from "../../packages/core/agent-harness.ts";
 import { InferenceFeedbackStore } from "../../packages/core/feedback-store.ts";
 import { VisualPedestrianNavigator } from "../../packages/locale-ko-kr/pedestrian-nav.ts";
-import {
-  checkLinearConnection,
-  LUMO_LINEAR_TICKETS,
-  syncTicketsToLinear,
-  triageUnprocessedFeedbackToLinear,
-} from "../../packages/core/linear-backlog.ts";
 import { runFullDaySimulation } from "../scenario-simulator/run-day.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -88,25 +82,11 @@ export function createCompanionServer(feedbackStorePath?: string) {
               .getRegisteredSkills()
               .map((s) => ({ id: s.id, labelKo: s.labelKo, priority: s.priority })),
           },
-          linearTickets: LUMO_LINEAR_TICKETS,
           subwayLines: Object.values(KOREAN_SUBWAY_LINES),
           transferHubs: KOREAN_SUBWAY_TRANSFER_HUBS,
           sampleBusStops: SEOUL_SAMPLE_BUS_STOPS,
           dailyTimeline: runFullDaySimulation(),
         });
-      }
-
-      if (req.method === "GET" && url.pathname === "/api/linear/roadmap") {
-        const connection = await checkLinearConnection();
-        return sendJson(res, 200, {
-          connection,
-          tickets: LUMO_LINEAR_TICKETS,
-        });
-      }
-
-      if (req.method === "POST" && url.pathname === "/api/linear/sync") {
-        const synced = await syncTicketsToLinear();
-        return sendJson(res, 200, synced);
       }
 
       if (req.method === "GET" && url.pathname === "/api/gemini/health") {
@@ -368,11 +348,6 @@ export function createCompanionServer(feedbackStorePath?: string) {
         const records = Array.isArray(body.records) ? body.records : [];
         const resStats = feedbackStore.mergeDeviceRecords(records);
         return sendJson(res, 200, { ok: true, ...resStats });
-      }
-
-      if (req.method === "POST" && url.pathname === "/api/feedback/triage") {
-        const triaged = await triageUnprocessedFeedbackToLinear(feedbackStore);
-        return sendJson(res, 200, { ok: true, ...triaged });
       }
 
       if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {

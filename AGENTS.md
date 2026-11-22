@@ -19,9 +19,7 @@
 - The Gemini API Key is stored in the macOS Keychain under the service name `LUMO_GEMINI_API_KEY`:
   - Read via `packages/core/keychain.ts` (`security find-generic-password -s LUMO_GEMINI_API_KEY -w`) or `GEMINI_API_KEY` env var fallback.
   - Default low-latency model verified with this key: `gemini-3.5-flash-lite` on `generativelanguage.googleapis.com/v1beta`.
-- Seoul/Metropolitan Public Transit API keys (when issued) are stored in the macOS Keychain under:
+- Seoul/Metropolitan Public Transit & TMAP API keys (when issued) are stored in the macOS Keychain under:
   - `LUMO_SEOUL_SUBWAY_API_KEY` (Seoul Open Data Plaza `swopenAPI.seoul.go.kr` realtime subway arrival)
   - `LUMO_SEOUL_BUS_API_KEY` (Seoul/Metropolitan Bus `ws.bus.go.kr` / data.go.kr)
-- Ticket & Backlog Management (MANDATORY ACROSS ALL SESSIONS):
-  - **Every time a task or feature is completed**, always summarize the user requirement and implementation details in `packages/core/linear-backlog.ts` and run `npm run sync:linear` so that the Linear workspace (`LUM` team) stays permanently up-to-date across sessions.
-  - Configured via `.devin/mcp_config.json` (`linear` MCP server at `https://mcp.linear.app/mcp`) and `packages/core/linear-backlog.ts` (`LUMO_LINEAR_API_KEY` Keychain slot).
+  - `LUMO_TMAP_API_KEY` (SKT TMAP POI, Pedestrian & Public Transit Routing)

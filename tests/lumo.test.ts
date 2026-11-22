@@ -35,7 +35,6 @@ import os from "node:os";
 import path from "node:path";
 import { InferenceFeedbackStore } from "../packages/core/feedback-store.ts";
 import { KoreaTransitProvider } from "../packages/locale-ko-kr/transit-provider.ts";
-import { LUMO_LINEAR_TICKETS } from "../packages/core/linear-backlog.ts";
 import {
   coachHeadingAlignmentKo,
   VisualPedestrianNavigator,
@@ -587,16 +586,7 @@ test("Companion Web Server HTTP API endpoints respond accurately", async () => {
       statusJson.transitCoverage.nationwideTagoScope,
       "BACKLOG_PHASE_2",
     );
-    assert.ok(
-      LUMO_LINEAR_TICKETS.some(
-        (t) => t.key === "LUMO-104" && t.phase === "PHASE_1_SEOUL_POC",
-      ),
-    );
-    assert.ok(
-      LUMO_LINEAR_TICKETS.some(
-        (t) => t.key === "LUMO-201" && t.phase === "PHASE_2_BACKLOG",
-      ),
-    );
+    assert.ok(statusJson.harness.registeredSkills.length >= 16);
 
     const subRes = await fetch(`${baseUrl}/api/transit/subway-check`, {
       method: "POST",
