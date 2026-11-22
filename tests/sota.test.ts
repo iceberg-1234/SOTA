@@ -507,7 +507,7 @@ test("TMAP live POI search (Recommended vs Distance + E-Mart Everyday expansion)
 test("InferenceFeedbackStore skips already-processed feedback and preserves linearIssueId across device merges", () => {
   const tmpFile = path.join(
     os.tmpdir(),
-    `lumo_fb_test_${Date.now()}.json`,
+    `sota_fb_test_${Date.now()}.json`,
   );
   try {
     const store = new InferenceFeedbackStore(tmpFile);
@@ -522,8 +522,8 @@ test("InferenceFeedbackStore skips already-processed feedback and preserves line
       spokenKorean: "140번 버스 진입 중입니다.",
       vote: "DOWN",
       feedbackText: "버스 번호 오인식",
-      linearIssueId: "LUM-99",
-      linearIssueUrl: "https://linear.app/lumo-2026/issue/LUM-99",
+      linearIssueId: "SOT-99",
+      linearIssueUrl: "https://linear.app/sota/issue/SOT-99",
     });
 
     store.addInferenceRecord({
@@ -566,7 +566,7 @@ test("InferenceFeedbackStore skips already-processed feedback and preserves line
 test("Companion Web Server HTTP API endpoints respond accurately", async () => {
   const tmpStorePath = path.join(
     os.tmpdir(),
-    `lumo_srv_fb_${Date.now()}.json`,
+    `sota_srv_fb_${Date.now()}.json`,
   );
   const server = createCompanionServer(tmpStorePath);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

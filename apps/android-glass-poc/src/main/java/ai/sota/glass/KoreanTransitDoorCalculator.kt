@@ -1,4 +1,4 @@
-package ai.lumo.glass
+package ai.sota.glass
 
 import kotlin.math.abs
 import kotlin.math.max

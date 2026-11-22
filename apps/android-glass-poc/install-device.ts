@@ -6,7 +6,7 @@ const HOME = os.homedir();
 const ADB = path.join(HOME, "Library/Android/sdk/platform-tools/adb");
 const EMULATOR = path.join(HOME, "Library/Android/sdk/emulator/emulator");
 const APK_PATH = path.resolve(
-  "apps/android-glass-poc/build/outputs/apk/debug/lumo-android-glass-poc-debug.apk",
+  "apps/android-glass-poc/build/outputs/apk/debug/sota-android-glass-poc-debug.apk",
 );
 
 interface AdbDeviceEntry {
@@ -125,20 +125,25 @@ async function main() {
   }
 
   console.log(`\n✅ 대상 디바이스 연결 확인됨: ${readyDevice.serial} (${readyDevice.details})`);
-  console.log("1. 로컬 Lumo 서버 포트 포워딩 설정 (adb reverse tcp:4310 tcp:4310)...");
+  console.log("1. 로컬 SOTA 서버 포트 포워딩 설정 (adb reverse tcp:4310 tcp:4310)...");
   execFileSync(ADB, ["-s", readyDevice.serial, "reverse", "tcp:4310", "tcp:4310"], {
     stdio: "inherit",
   });
 
-  console.log("2. Lumo APK 설치 및 카메라/마이크/위치 권한 자동 승인...");
+  console.log("2. SOTA APK 설치 및 카메라/마이크/위치 권한 자동 승인...");
+  try {
+    execFileSync(ADB, ["-s", readyDevice.serial, "uninstall", "ai.lumo.glass"], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+  } catch {}
   execFileSync(ADB, ["-s", readyDevice.serial, "install", "-r", "-g", APK_PATH], {
     stdio: "inherit",
   });
 
-  console.log("3. 기기에서 Lumo (루모) AI Glass 앱 실행...");
+  console.log("3. 기기에서 SOTA (소타) AI Glass 앱 실행...");
   execFileSync(
     ADB,
-    ["-s", readyDevice.serial, "shell", "am", "start", "-n", "ai.lumo.glass/.MainActivity"],
+    ["-s", readyDevice.serial, "shell", "am", "start", "-n", "ai.sota.glass/.MainActivity"],
     { stdio: "inherit" },
   );
 

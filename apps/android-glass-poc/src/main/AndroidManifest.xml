@@ -27,7 +27,7 @@
     </queries>
 
     <application
-        android:label="Lumo AI Glass"
+        android:label="SOTA AI Glass"
         android:usesCleartextTraffic="true"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
@@ -47,7 +47,7 @@
         </activity>
 
         <service
-            android:name=".LumoGlassCompanionService"
+            android:name=".SotaGlassCompanionService"
             android:exported="false"
             android:foregroundServiceType="camera|microphone|location" />
     </application>

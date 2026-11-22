@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 
-export const KEYCHAIN_SERVICE_GEMINI = "LUMO_GEMINI_API_KEY";
-export const KEYCHAIN_SERVICE_SEOUL_SUBWAY = "LUMO_SEOUL_SUBWAY_API_KEY";
-export const KEYCHAIN_SERVICE_SEOUL_BUS = "LUMO_SEOUL_BUS_API_KEY";
-export const KEYCHAIN_SERVICE_TMAP = "LUMO_TMAP_API_KEY";
-export const KEYCHAIN_SERVICE_TRANSIT = "LUMO_KOREA_TRANSIT_API_KEY";
+export const KEYCHAIN_SERVICE_GEMINI = "SOTA_GEMINI_API_KEY";
+export const KEYCHAIN_SERVICE_SEOUL_SUBWAY = "SOTA_SEOUL_SUBWAY_API_KEY";
+export const KEYCHAIN_SERVICE_SEOUL_BUS = "SOTA_SEOUL_BUS_API_KEY";
+export const KEYCHAIN_SERVICE_TMAP = "SOTA_TMAP_API_KEY";
+export const KEYCHAIN_SERVICE_TRANSIT = "SOTA_KOREA_TRANSIT_API_KEY";
 
 /**
  * Reads a secret from macOS Keychain (`security find-generic-password`) or falls back to an environment variable.

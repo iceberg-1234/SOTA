@@ -1,4 +1,4 @@
-package ai.lumo.glass
+package ai.sota.glass
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -55,7 +55,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
- * Field-Testing Lumo Activity with Full Pedestrian Wayfinding & Feedback Logger:
+ * Field-Testing SOTA Activity with Full Pedestrian Wayfinding & Feedback Logger:
  * 1. Destination Search -> Origin Address & Candidate Destination Confirmation (Fixes LUM-46, LUM-48)
  * 2. Live GPS + Compass Heading + Turn-by-Turn Pedestrian Route Tracking
  * 3. Live Camera View + `AI 답변 ON / OFF` Toggle
@@ -64,6 +64,7 @@ import java.util.concurrent.Executors
 class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListener {
     private var tts: TextToSpeech? = null
     private lateinit var missionInput: EditText
+    private lateinit var topCameraCardRef: LinearLayout
     private lateinit var glassModeTabBtn: Button
     private lateinit var labModeTabBtn: Button
     private lateinit var glassSimulatorPanel: LinearLayout
@@ -237,6 +238,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             setPadding(24, 18, 24, 18)
             setBackgroundColor(Color.parseColor("#131926"))
         }
+        topCameraCardRef = topCameraCard
 
         // 1. Unified Interactive Command Bar (Text + Voice Input -> Simulates voice commands for Pilot testing, Fixes LUM-65 & LUM-66)
         searchRow = LinearLayout(this).apply {
@@ -303,7 +305,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                 val query = missionInput.text.toString().trim()
                 if (query.isEmpty()) {
                     WayfindingNavigator.clearRoute()
-                    val msg = NativeLumoAiClient.startOrClearMission("")
+                    val msg = NativeSotaAiClient.startOrClearMission("")
                     candidateConfirmBox.visibility = View.GONE
                     activeNavBanner.visibility = View.GONE
                     speakNative(msg)
@@ -461,7 +463,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         // Build Google Android XR AI Glasses Simulator Panel (Glimmer HUD + Temple Touchpad + Voice Feedback)
         glassSimulatorPanel = buildGlassWearableSimulatorPanel()
 
-        // 0. 6-Category Multi-Use-Case Verification Tabs + One-Tap Quick Scenario Chips (Fixes LUMO-130)
+        // 0. 6-Category Multi-Use-Case Verification Tabs + One-Tap Quick Scenario Chips (Fixes SOTA-130)
         categoryScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             layoutParams = LinearLayout.LayoutParams(
@@ -559,14 +561,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             labControlsContainer.visibility = View.GONE
             historyScrollView.visibility = View.GONE
             glassSimulatorPanel.visibility = View.VISIBLE
+            topCameraCardRef.layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+            glassSimulatorPanel.layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
             cameraTextureView.layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                190
+                210
             ).apply { setMargins(0, 0, 0, 10) }
         } else {
             glassSimulatorPanel.visibility = View.GONE
             labControlsContainer.visibility = View.VISIBLE
             historyScrollView.visibility = View.VISIBLE
+            topCameraCardRef.layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
             cameraTextureView.layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 250
@@ -676,41 +692,61 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             }
         })
 
+        // Dedicated Live Speech-to-Text & Inference Status Card (Always visible, never clipped!)
+        val liveSttBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0B1320"))
+            setPadding(22, 16, 22, 16)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 12) }
+        }
+        val sttHeader = TextView(this).apply {
+            text = "🎙️ LIVE VOICE & INFERENCE STATUS"
+            setTextColor(Color.parseColor("#FFD400"))
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        glassTouchpadStatusTv = TextView(this).apply {
+            text = "Ready — Hold Touchpad or press Vol UP to speak"
+            setTextColor(Color.parseColor("#00E676"))
+            textSize = 15.5f
+            typeface = Typeface.DEFAULT_BOLD
+            minLines = 2
+            setPadding(0, 6, 0, 0)
+        }
+        liveSttBox.addView(sttHeader)
+        liveSttBox.addView(glassTouchpadStatusTv)
+
         val touchpadZone = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setBackgroundColor(Color.parseColor("#1E293B"))
-            setPadding(24, 34, 24, 34)
+            setPadding(28, 28, 28, 28)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                340
+                0,
+                1f
             ).apply { setMargins(0, 0, 0, 12) }
             setOnTouchListener { _, event -> gestureDetector.onTouchEvent(event) }
         }
         val padTitle = TextView(this).apply {
             text = "👆 TEMPLE TOUCHPAD (Eyes-Free Gesture Zone)"
             setTextColor(Color.parseColor("#FFD400"))
-            textSize = 14.5f
+            textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
         }
         val padGuide = TextView(this).apply {
-            text = "• Single Tap: Mute Speech / Repeat / Confirm Route\n• Touch & Hold: 🎙️ Ask Lumo (Voice Query)\n• Double Tap: 📸 Instant Camera Snap\n• Swipe L/R: Cycle Candidates / Toggle Live AI\n• Hardware Vol UP: Talk | Vol DOWN: Snap (2x = Live AI)"
+            text = "• Single Tap: Mute Speech / Repeat / Confirm Route\n• Touch & Hold: 🎙️ Ask SOTA (Voice Query)\n• Double Tap: 📸 Instant Camera Snap\n• Swipe L/R: Cycle Candidates / Toggle Live AI\n• Hardware Vol UP: Talk | Vol DOWN: Snap (2x = Live AI)"
             setTextColor(Color.parseColor("#CBD5E1"))
-            textSize = 12f
+            textSize = 12.5f
             gravity = Gravity.CENTER
-            setPadding(0, 12, 0, 10)
-        }
-        glassTouchpadStatusTv = TextView(this).apply {
-            text = "Ready"
-            setTextColor(Color.parseColor("#00E676"))
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
+            setPadding(0, 14, 0, 0)
         }
         touchpadZone.addView(padTitle)
         touchpadZone.addView(padGuide)
-        touchpadZone.addView(glassTouchpadStatusTv)
 
         // 3. Hands-Free Instant Feedback Row
         val quickFbRow = LinearLayout(this).apply {
@@ -770,6 +806,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         quickFbRow.addView(quickVoiceDownBtn)
 
         panel.addView(hudCard)
+        panel.addView(liveSttBox)
         panel.addView(touchpadZone)
         panel.addView(quickFbRow)
         return panel
@@ -792,7 +829,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             when (event.keyCode) {
                 KeyEvent.KEYCODE_VOLUME_UP -> {
                     isRecordingVoiceFeedback = false
-                    glassTouchpadStatusTv.text = "🎙️ [Vol UP] Listening — Ask Lumo now..."
+                    glassTouchpadStatusTv.text = "🎙️ [Vol UP] Listening — Ask SOTA now..."
                     startInlineVoiceListening()
                     return true
                 }
@@ -820,7 +857,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         quickChipRow.removeAllViews()
 
         val activeCat = useCaseCategories.find { it.id == activeCategoryId } ?: useCaseCategories.first()
-        NativeLumoAiClient.selectedUseCaseCategory = activeCat.id
+        NativeSotaAiClient.selectedUseCaseCategory = activeCat.id
         if (::missionInput.isInitialized) {
             missionInput.hint = activeCat.inputHint
         }
@@ -883,9 +920,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         } else {
             agentSpoken
         }
-        val replyObj = NativeLumoAiClient.AutoAiReply(
+        val replyObj = NativeSotaAiClient.AutoAiReply(
             ok = true,
-            model = "lumo-dialogue-agent",
+            model = "sota-dialogue-agent",
             detectedModeTag = modeTag,
             detectedModeLabelKo = modeLabelKo,
             activeWindowSummary = modeTag,
@@ -1482,7 +1519,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
-                putExtra(RecognizerIntent.EXTRA_PROMPT, if (isRecordingVoiceFeedback) "Speak your feedback note" else "Ask Lumo or say a destination")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, if (isRecordingVoiceFeedback) "Speak your feedback note" else "Ask SOTA or say a destination")
             }
             startActivityForResult(intent, REQ_VOICE_FALLBACK)
         } catch (_: Exception) {}
@@ -1547,7 +1584,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         val taxiMatch = Regex("(?:택시|장콜|차량|번호판?)\\s*(\\d{2,3}\\s*[가-힣]\\s*\\d{4})").find(spoken)
         if (taxiMatch != null) {
             val plate = taxiMatch.groupValues[1].trim()
-            NativeLumoAiClient.expectedTaxiPlate = plate
+            NativeSotaAiClient.expectedTaxiPlate = plate
             val msg = "호출하신 차량 번호 $plate 번을 등록했어요. 이제 진입하는 차량을 카메라로 비추시면 번호판과 뒷좌석 문 손잡이 위치를 안내해 드릴게요."
             speakNative(msg)
             logDialogueTurnAsFeedbackCard("TAXI_REGISTERED", "호출 택시 번호 등록 ($plate)", spoken, msg)
@@ -1643,6 +1680,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             }
         }
 
+        // LUM-148 & LUM-149: Never route vision/reading/expiry/memory/inspection utterances to TMAP destination search!
+        val isVisionOrMemoryRequest = Regex("읽어|유통기한|소비기한|제조일자|기한|날짜|글씨|글자|기억|외워|어디\\s*있어|보여|보이는|뭐야|뭔지|상황\\s*설명|반찬|우유|주스|약봉지|안약|영양제|카드|인덕션|얼룩|청소기").containsMatchIn(spoken)
+        if (isVisionOrMemoryRequest) {
+            runSingleInferenceStep(userQuery = spoken)
+            return
+        }
+
         val navTrigger = Regex("(.+?)(?:으로|로)?\\s*(?:가자|안내해|안내해줘|길찾기|찾아줘|갈래|가고\\s*싶어|가는\\s*길|바꿔|바꿔줘|바꿀래|변경|변경해줘)").find(spoken)
         if (navTrigger != null) {
             val placeKeyword = WayfindingNavigator.extractCleanPlaceQuery(navTrigger.groupValues[1])
@@ -1653,7 +1697,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             }
         }
 
-        // LUM-135, LUM-137, LUM-138: If user interrupted with "그냥 컴포즈 커피 홍제 폭포", "아니 포자랩스", "목적지 포자랩스"
+        // LUM-135, LUM-137, LUM-138: Only trigger barge-in place search when at least a real place noun (>= 2 chars, not a verb) remains
         if (Regex("^(?:그냥|다시|아니|목적지)\\s+").containsMatchIn(spoken.trim()) && cleanedPlaceCandidate.length >= 2 && !spoken.contains("?")) {
             WayfindingNavigator.clearRoute()
             searchDestinationAndPromptUser(cleanedPlaceCandidate)
@@ -1706,10 +1750,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
 
     private fun grabCurrentCameraFrame(): CapturedFrameResult {
         if (!cameraTextureView.isAvailable) return CapturedFrameResult(null, false, false, false)
-        val bmp: Bitmap = cameraTextureView.getBitmap(320, 240) ?: return CapturedFrameResult(null, false, false, false)
+        val bmp: Bitmap = cameraTextureView.getBitmap(512, 384) ?: return CapturedFrameResult(null, false, false, false)
         val (tooDark, lowLight, highGlare) = analyzeFrameLuminance(bmp)
         val baos = ByteArrayOutputStream()
-        bmp.compress(Bitmap.CompressFormat.JPEG, 52, baos)
+        bmp.compress(Bitmap.CompressFormat.JPEG, 72, baos)
         val b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
         return CapturedFrameResult(b64, tooDark, lowLight, highGlare)
     }
@@ -1727,7 +1771,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         val captured = grabCurrentCameraFrame()
         if (captured.isTooDark && userQuery.isBlank()) {
             requestInFlight = false
-            val darkReply = NativeLumoAiClient.AutoAiReply(
+            val darkReply = NativeSotaAiClient.AutoAiReply(
                 ok = true,
                 model = "on-device-luminance-guard",
                 detectedModeTag = "DARK_FRAME",
@@ -1754,7 +1798,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         }
 
         ioExecutor.execute {
-            val reply = NativeLumoAiClient.analyzeAutoSceneFlashLite(
+            val reply = NativeSotaAiClient.analyzeAutoSceneFlashLite(
                 userQuery = (userQuery + lightingHint).trim(),
                 imageBase64Jpeg = captured.base64Jpeg,
                 previousSpeech = lastSpokenText
@@ -1799,9 +1843,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                             return@runOnUiThread
                         }
                         "SEARCH_PLACE" -> if (!reply.navTargetPlace.isNullOrBlank()) {
-                            WayfindingNavigator.clearRoute()
-                            searchDestinationAndPromptUser(reply.navTargetPlace)
-                            return@runOnUiThread
+                            val cleanPlace = WayfindingNavigator.extractCleanPlaceQuery(reply.navTargetPlace)
+                            val isReadingQuery = Regex("읽어|유통기한|소비기한|기억|설명").containsMatchIn(userQuery)
+                            if (!isReadingQuery && cleanPlace.length >= 2) {
+                                WayfindingNavigator.clearRoute()
+                                searchDestinationAndPromptUser(cleanPlace)
+                                return@runOnUiThread
+                            }
                         }
                         "SELECT_CANDIDATE" -> {
                             val idx = (reply.navCandidateIndex ?: 1) - 1
@@ -2170,7 +2218,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                 override fun onStart(utteranceId: String?) {}
                 override fun onDone(utteranceId: String?) {
                     // Only auto-open inline microphone for explicit Planning / Route Confirmation questions!
-                    if (utteranceId?.startsWith("lumo_question_") == true) {
+                    if (utteranceId?.startsWith("sota_question_") == true) {
                         mainHandler.postDelayed({ startInlineVoiceListening() }, 250L)
                     } else if (aiEnabled) {
                         // Event-driven next frame trigger: scan next camera frame 650ms after TTS finishes speaking!
@@ -2184,11 +2232,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
     }
 
     private fun speakNative(text: String, autoListenAfter: Boolean = false) {
-        val naturalSpeech = NativeLumoAiClient.cleanMovementRelativeDirection(text)
+        val naturalSpeech = NativeSotaAiClient.cleanMovementRelativeDirection(text)
         val utterId = if (autoListenAfter) {
-            "lumo_question_${System.currentTimeMillis()}"
+            "sota_question_${System.currentTimeMillis()}"
         } else {
-            "lumo_native_${System.currentTimeMillis()}"
+            "sota_native_${System.currentTimeMillis()}"
         }
         tts?.speak(naturalSpeech, TextToSpeech.QUEUE_FLUSH, null, utterId)
     }

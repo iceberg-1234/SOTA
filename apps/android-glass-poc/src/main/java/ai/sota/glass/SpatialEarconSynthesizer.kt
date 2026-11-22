@@ -1,4 +1,4 @@
-package ai.lumo.glass
+package ai.sota.glass
 
 import android.media.AudioAttributes
 import android.media.AudioFormat

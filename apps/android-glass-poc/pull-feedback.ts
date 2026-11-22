@@ -20,9 +20,9 @@ function main() {
       [
         "exec-out",
         "run-as",
-        "ai.lumo.glass",
+        "ai.sota.glass",
         "cat",
-        "files/lumo_feedback_logs.json",
+        "files/sota_feedback_logs.json",
       ],
       { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 },
     ).trim();

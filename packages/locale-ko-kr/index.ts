@@ -1,10 +1,10 @@
-import type { LumoOrchestrator } from "../core/orchestrator.ts";
+import type { SotaOrchestrator } from "../core/orchestrator.ts";
 import { KoreanSmartReader } from "../core/smart-reader.ts";
 import { verifyCalledTaxiOrRideKo } from "../core/transit-engine.ts";
 
 const smartReader = new KoreanSmartReader();
 
-export const KO_KR_SYSTEM_PROMPT = `당신은 한국 시각장애인 및 저시력자의 스마트 글래스 동반자 '루모(Lumo)'입니다.
+export const KO_KR_SYSTEM_PROMPT = `당신은 한국 시각장애인 및 저시력자의 스마트 글래스 동반자 '소타(SOTA)'입니다.
 원칙:
 1. 기계적인 스크린 리더기처럼 기호(→, [], (), /)를 읽지 않고, 옆에서 함께 걷는 친구처럼 자연스러운 구어체(~해요, ~볼까요?)로 1~2문장 이내로 안내합니다.
 2. '12시 방향'이나 '밝은 색 보도' 대신 사용자의 이동 진행 방향 기준과 촉각 단서(점자블록, 난간, 보도턱), 걸음 수로 설명합니다.
@@ -33,7 +33,7 @@ export interface DailySimulationStep {
   time: string;
   title: string;
   userVoiceOrContext: string;
-  execute: (orchestrator: LumoOrchestrator) => string;
+  execute: (orchestrator: SotaOrchestrator) => string;
 }
 
 export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
@@ -41,7 +41,7 @@ export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
     useCaseId: "UC-01",
     time: "07:00",
     title: "기상 및 복약/안약 구분",
-    userVoiceOrContext: "루모, 지금 손에 든 거 아침 안약 맞아? 식후 약은 어디 있어?",
+    userVoiceOrContext: "소타, 지금 손에 든 거 아침 안약 맞아? 식후 약은 어디 있어?",
     execute: (orch) =>
       orch.handleObjectFinder(
         "식후 아침 약 봉지",
@@ -63,7 +63,7 @@ export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
     useCaseId: "UC-03",
     time: "08:00",
     title: "외출 준비 (옷 얼룩 확인 및 분실 이어폰 탐색)",
-    userVoiceOrContext: "루모, 내 셔츠 깨끗해? 그리고 에어팟 케이스 어디 있지?",
+    userVoiceOrContext: "소타, 내 셔츠 깨끗해? 그리고 에어팟 케이스 어디 있지?",
     execute: (orch) =>
       orch.handleObjectFinder(
         "에어팟 케이스",
@@ -119,7 +119,7 @@ export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
     useCaseId: "UC-07",
     time: "08:35",
     title: "버스 정류장 방향 검증, 도착 시간 확인 및 진입 버스 탑승",
-    userVoiceOrContext: "루모, 여기 강남역 가는 정류장 맞아? 472번 언제 와?",
+    userVoiceOrContext: "소타, 여기 강남역 가는 정류장 맞아? 472번 언제 와?",
     execute: (orch) =>
       orch.handleBusStopCheck({
         targetRouteNumber: "472",
@@ -145,7 +145,7 @@ export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
     time: "08:50",
     title: "지하철 승강장 검증, 열차 도착 시간 및 빠른 환승 탑승 위치(3-2 -> 5-3) 이동 코칭",
     userVoiceOrContext:
-      "루모, 여기 교대 가는 승강장 맞아? 지하철 언제 와? 여기서 타면 빠른 환승 돼?",
+      "소타, 여기 교대 가는 승강장 맞아? 지하철 언제 와? 여기서 타면 빠른 환승 돼?",
     execute: (orch) =>
       orch.handleSubwayPlatformCheck({
         lineName: "2호선",
@@ -181,7 +181,7 @@ export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
     useCaseId: "UC-10",
     time: "12:30",
     title: "식당 무인 키오스크 손가락 위치(Hand-to-UI) 코칭",
-    userVoiceOrContext: "루모, 키오스크에서 김치찌개 단품 버튼 어디 있어?",
+    userVoiceOrContext: "소타, 키오스크에서 김치찌개 단품 버튼 어디 있어?",
     execute: (orch) =>
       orch.handleKioskHandCoach(
         {
@@ -247,7 +247,7 @@ export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
     useCaseId: "UC-15",
     time: "20:30",
     title: "[해외 1위 사례·한국 특화] 호출 택시·장애인 콜택시 번호판·차종 및 뒷좌석 문 손잡이 안내",
-    userVoiceOrContext: "루모, 지금 앞에 선 차가 내가 부른 택시 맞아?",
+    userVoiceOrContext: "소타, 지금 앞에 선 차가 내가 부른 택시 맞아?",
     execute: (orch) => {
       const res = verifyCalledTaxiOrRideKo({
         expectedPlateNumber: "34바 5678",
@@ -263,7 +263,7 @@ export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
     useCaseId: "UC-16",
     time: "20:45",
     title: "[중심시야 결손·마트 쇼핑] 편의점/마트 유사 음료 용기(제로슈거·맛·1+1 행사·가격) 구분",
-    userVoiceOrContext: "루모, 지금 손에 든 캔 음료 뭐고 행사 상품이야?",
+    userVoiceOrContext: "소타, 지금 손에 든 캔 음료 뭐고 행사 상품이야?",
     execute: (orch) =>
       orch.handleSmartBriefing(
         smartReader.summarizeGroceryProductKo({
@@ -279,7 +279,7 @@ export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
     useCaseId: "UC-17",
     time: "21:00",
     title: "[대비감도·식사 보조] 흰 접시/식판 위 반찬 배치 및 생선 가시·남은 양 브리핑",
-    userVoiceOrContext: "루모, 식탁 위 반찬 어디에 뭐가 있는지 알려줘",
+    userVoiceOrContext: "소타, 식탁 위 반찬 어디에 뭐가 있는지 알려줘",
     execute: (orch) =>
       orch.handleSmartBriefing(
         smartReader.describeDiningPlateLayoutKo([
@@ -366,7 +366,7 @@ export const KOREAN_DAILY_SIMULATION_STEPS: readonly DailySimulationStep[] = [
     useCaseId: "UC-23",
     time: "22:30",
     title: "[미션 코파일럿] 전체 이동 계획(Macro Plan) 브리핑 및 출발 확정 후 실시간 동행 수행",
-    userVoiceOrContext: "루모야, 구의역 가는 전체 계획 먼저 알려주고 출발하자",
+    userVoiceOrContext: "소타야, 구의역 가는 전체 계획 먼저 알려주고 출발하자",
     execute: (orch) =>
       orch.handleSmartBriefing(
         "전체 이동 계획을 먼저 말씀드릴게요. 지금 계신 곳에서 역삼역까지 걸어가신 다음, 2호선을 타고 구의역에서 내리는 총 3구간 경로예요. 이 계획대로 출발할까요?",

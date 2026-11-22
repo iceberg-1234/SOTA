@@ -154,7 +154,7 @@ export class KoreaTransitProvider {
 
   /**
    * Calls Seoul Open Data Plaza Realtime Subway Arrival API (`swopenAPI.seoul.go.kr`)
-   * using `LUMO_SEOUL_SUBWAY_API_KEY` from macOS Keychain.
+   * using `SOTA_SEOUL_SUBWAY_API_KEY` from macOS Keychain.
    */
   async fetchSeoulSubwayArrivalLive(params: {
     stationName: string;
@@ -212,7 +212,7 @@ export class KoreaTransitProvider {
 
   /**
    * Calls Seoul Bus Station Information API (`ws.bus.go.kr/api/rest/stationinfo/getStationByUid`)
-   * using `LUMO_SEOUL_BUS_API_KEY` from macOS Keychain.
+   * using `SOTA_SEOUL_BUS_API_KEY` from macOS Keychain.
    */
   async fetchSeoulBusStopGuidanceLive(params: {
     observedArsId: string;

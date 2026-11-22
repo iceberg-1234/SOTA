@@ -16,7 +16,7 @@ plugins {
 }
 
 android {
-    namespace = "ai.lumo.glass"
+    namespace = "ai.sota.glass"
     compileSdk = 34
 
     buildFeatures {
@@ -24,17 +24,17 @@ android {
     }
 
     defaultConfig {
-        applicationId = "ai.lumo.glass"
+        applicationId = "ai.sota.glass"
         minSdk = 29
         targetSdk = 34
         versionCode = 2
         versionName = "0.2.0-poc"
 
-        val devLanUrl = System.getenv("LUMO_DEV_LAN_URL")?.trim()?.takeIf { it.isNotEmpty() } ?: "http://127.0.0.1:4310"
-        buildConfigField("String", "GEMINI_API_KEY", "\"${readKeychainSecret("LUMO_GEMINI_API_KEY")}\"")
-        buildConfigField("String", "SEOUL_SUBWAY_KEY", "\"${readKeychainSecret("LUMO_SEOUL_SUBWAY_API_KEY")}\"")
-        buildConfigField("String", "SEOUL_BUS_KEY", "\"${readKeychainSecret("LUMO_SEOUL_BUS_API_KEY")}\"")
-        buildConfigField("String", "TMAP_API_KEY", "\"${readKeychainSecret("LUMO_TMAP_API_KEY")}\"")
+        val devLanUrl = System.getenv("SOTA_DEV_LAN_URL")?.trim()?.takeIf { it.isNotEmpty() } ?: "http://127.0.0.1:4310"
+        buildConfigField("String", "GEMINI_API_KEY", "\"${readKeychainSecret("SOTA_GEMINI_API_KEY")}\"")
+        buildConfigField("String", "SEOUL_SUBWAY_KEY", "\"${readKeychainSecret("SOTA_SEOUL_SUBWAY_API_KEY")}\"")
+        buildConfigField("String", "SEOUL_BUS_KEY", "\"${readKeychainSecret("SOTA_SEOUL_BUS_API_KEY")}\"")
+        buildConfigField("String", "TMAP_API_KEY", "\"${readKeychainSecret("SOTA_TMAP_API_KEY")}\"")
         buildConfigField("String", "DEV_LAN_URL", "\"$devLanUrl\"")
     }
 

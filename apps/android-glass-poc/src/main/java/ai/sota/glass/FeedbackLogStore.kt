@@ -1,4 +1,4 @@
-package ai.lumo.glass
+package ai.sota.glass
 
 import android.content.Context
 import org.json.JSONArray
@@ -29,11 +29,11 @@ data class InferenceFeedbackEntry(
 
 /**
  * Persists every AI inference (timestamp, latency, captured camera JPEG frame, AI inferred situation mode,
- * spoken answer, 👍/👎 vote, and detailed user feedback text) to internal storage (`files/lumo_feedback_logs.json`)
+ * spoken answer, 👍/👎 vote, and detailed user feedback text) to internal storage (`files/sota_feedback_logs.json`)
  * and syncs to the development PC when connected or via `npm run feedback:pull`.
  */
 object FeedbackLogStore {
-    private const val FILE_NAME = "lumo_feedback_logs.json"
+    private const val FILE_NAME = "sota_feedback_logs.json"
     private const val MAX_STORED_ENTRIES = 60
     private val entries = mutableListOf<InferenceFeedbackEntry>()
     private var loaded = false
@@ -54,7 +54,7 @@ object FeedbackLogStore {
                         id = o.optString("id"),
                         timestampIso = o.optString("timestampIso"),
                         displayTime = o.optString("displayTime"),
-                        model = o.optString("model", NativeLumoAiClient.CHEAPEST_FAST_MODEL),
+                        model = o.optString("model", NativeSotaAiClient.CHEAPEST_FAST_MODEL),
                         latencyMs = o.optLong("latencyMs", 0L),
                         detectedMode = o.optString("detectedMode", "AUTO"),
                         detectedModeLabelKo = o.optString("detectedModeLabelKo", ""),
@@ -72,7 +72,7 @@ object FeedbackLogStore {
     @Synchronized
     fun addEntry(
         context: Context,
-        reply: NativeLumoAiClient.AutoAiReply,
+        reply: NativeSotaAiClient.AutoAiReply,
         imageBase64: String?
     ): InferenceFeedbackEntry {
         ensureLoaded(context)

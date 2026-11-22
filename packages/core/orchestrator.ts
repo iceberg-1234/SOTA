@@ -15,7 +15,7 @@ import {
   type TransferCorridorSignObservation,
 } from "./transit-engine.ts";
 
-export type LumoOperatingMode =
+export type SotaOperatingMode =
   | "IDLE_COMPANION"
   | "WALKING_NAV"
   | "TRANSIT_HUB"
@@ -42,19 +42,19 @@ export interface PedestrianTurnEvent {
   tactileContinues: boolean;
 }
 
-export class LumoOrchestrator {
-  private mode: LumoOperatingMode = "IDLE_COMPANION";
+export class SotaOrchestrator {
+  private mode: SotaOperatingMode = "IDLE_COMPANION";
   private readonly arbiter: PriorityAudioArbiter;
 
   constructor(arbiter: PriorityAudioArbiter) {
     this.arbiter = arbiter;
   }
 
-  getMode(): LumoOperatingMode {
+  getMode(): SotaOperatingMode {
     return this.mode;
   }
 
-  setMode(mode: LumoOperatingMode): void {
+  setMode(mode: SotaOperatingMode): void {
     this.mode = mode;
   }
 

@@ -14,4 +14,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "lumo-android-glass-poc"
+rootProject.name = "sota-android-glass-poc"

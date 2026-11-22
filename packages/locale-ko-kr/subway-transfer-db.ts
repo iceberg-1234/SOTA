@@ -332,7 +332,7 @@ export interface SubwayStationCoordAndDoor {
 
 /**
  * GPS coordinates and door opening side (오른쪽=상대식, 왼쪽=섬식) for key Seoul Subway stations
- * so Lumo can infer which station the train is currently passing using live GPS (Fixes LUM-83, LUM-84, LUM-85, LUM-105).
+ * so SOTA can infer which station the train is currently passing using live GPS (Fixes LUM-83, LUM-84, LUM-85, LUM-105).
  */
 export const SEOUL_SUBWAY_STATION_COORDS: Record<string, SubwayStationCoordAndDoor> = {
   상왕십리: { lat: 37.5643, lng: 127.0293, doorSideKo: "오른쪽" },
