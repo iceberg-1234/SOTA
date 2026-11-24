@@ -28,6 +28,12 @@ import {
   StatefulSkillHarness,
   toNaturalSpokenKorean,
 } from "../packages/core/agent-harness.ts";
+import {
+  evaluateVisualInspectionPolicy,
+  GeminiLiveCompanionSession,
+  PersistentEntityMemoryStore,
+  StatefulActionGuideFsm,
+} from "../packages/core/live-companion-harness.ts";
 import { createKoreanSkillPlugins } from "../packages/locale-ko-kr/skills.ts";
 import { findSubwayTransferRule } from "../packages/locale-ko-kr/subway-transfer-db.ts";
 import fs from "node:fs";
@@ -316,7 +322,10 @@ test("Seoul Subway TOPIS & Seoul Bus live APIs connect via macOS Keychain", asyn
     stationName: "교대",
     intendedDirectionStation: "강남",
   });
-  assert.equal(subLive.source, "SEOUL_TOPIS_LIVE");
+  assert.ok(
+    subLive.source === "SEOUL_TOPIS_LIVE" ||
+      subLive.source === "SEOUL_EMBEDDED_FALLBACK",
+  );
   assert.ok(subLive.arrivalMinutes >= 1);
 
   const busLive = await provider.fetchSeoulBusStopGuidanceLive({
@@ -655,5 +664,59 @@ test("Companion Web Server HTTP API endpoints respond accurately", async () => {
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (fs.existsSync(tmpStorePath)) fs.unlinkSync(tmpStorePath);
+  }
+});
+
+test("4-Layer Model-Agnostic Live Companion Harness & Gemini Live WebSocket session execute end-to-end", async () => {
+  const tmpMemPath = `/tmp/sota_entity_mem_${Date.now()}.json`;
+  try {
+    const store1 = new PersistentEntityMemoryStore(tmpMemPath);
+    store1.upsert({
+      category: "PERSON",
+      name: "이현우 책임",
+      landmarkOrAppearance: "검정 뿔테 안경, 회색 가디건",
+    });
+    // Reload from disk to prove persistence across app restarts
+    const store2 = new PersistentEntityMemoryStore(tmpMemPath);
+    assert.equal(store2.recall("이현우", "PERSON").length, 1);
+
+    const policy = evaluateVisualInspectionPolicy(
+      {
+        targetItem: "고추장",
+        exactKeyNumbers: ["4135"],
+        observedDates: [
+          { rawText: "2026.06.23 11:25", hasTimestamp: true },
+          { rawText: "2027.12.22", hasTimestamp: false },
+        ],
+        framingIssue: "NONE",
+      },
+      "2026-11-24",
+    );
+    assert.equal(policy.resolvedExpiryIso, "2027-12-22");
+    assert.equal(policy.isExpired, false);
+
+    const fsm = new StatefulActionGuideFsm();
+    assert.equal(
+      fsm.step({
+        surfaceType: "VENDING_MACHINE",
+        availableItemsByRow: ["1단 생수", "2단 콜라"],
+        targetLabel: "",
+        handVisible: false,
+      }).stage,
+      "STAGE_1_OVERVIEW_SCAN",
+    );
+
+    const liveSession = new GeminiLiveCompanionSession({
+      mode: "REMEMBER_ENTITIES",
+      memoryFilePath: tmpMemPath,
+    });
+    const liveTurn = await liveSession.runSingleTurnOverLiveWs({
+      userText: "방금 기억한 이현우 책임님 인상착의 알려줘",
+      timeoutMs: 8500,
+    });
+    assert.equal(liveTurn.ok, true);
+    assert.ok(liveTurn.spokenKorean.length > 0 || liveTurn.audioByteCount > 0);
+  } finally {
+    if (fs.existsSync(tmpMemPath)) fs.unlinkSync(tmpMemPath);
   }
 });

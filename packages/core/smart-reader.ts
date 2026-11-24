@@ -82,7 +82,7 @@ export class KoreanSmartReader {
       return {
         isExpired: true,
         daysRemaining: diffDays,
-        spokenKorean: `주의하세요. ${posPrefix}${info.productName} 소비기한이 ${dateKo}까지로 ${Math.abs(diffDays)}일 지났습니다.`,
+        spokenKorean: `주의하세요. ${posPrefix}${info.productName} 소비기한이 ${dateKo}까지로 ${Math.abs(diffDays)}일 지났습니다. 드시지 마세요.`,
       };
     }
 

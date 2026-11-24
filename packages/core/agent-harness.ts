@@ -244,11 +244,52 @@ export function inferOrCorrectSceneModeFromContent(
 ): AutoDetectedSceneMode {
   if (taggedMode === "NAV_CONTROL" || slots.navAction) return "NAV_CONTROL";
 
-  // LUM-143, LUM-147, & LUM-155: Handheld/tabletop food containers (e.g. '투게더 아이스크림 통'), cards, books, supplements, or bottles must route to SMART_READER!
+  // Structural Scene Mode Corrector (100% Zero Item-Noun Hardcoding — classifies by functional/container structure!):
+  const isApplianceStructure =
+    /정수기|물받이|출수|온수|냉수|인덕션|화구|잔열|세탁기|전자레인지|보일러|온도조절기|에어컨|난방|리모컨|작동\s*중|가열/.test(text);
   if (
-    /손에\s*(?:쥐고|들고)|출입카드|카드|출입증|신분증|유의사항|생활지원센터|관리사무소|책을\s*들고|샴푸|린스|컨디셔너|바디워시|세안제|로션|아이스크림|투게더|바닐라|요거트|과자|컵라면|통이\s*보이|통에\s*담겨|제품이고/.test(
+    isApplianceStructure &&
+    (taggedMode === "WALKING_SAFETY" || taggedMode === "SMART_READER")
+  ) {
+    return "APPLIANCE_SAFETY";
+  }
+  const isInteractiveTerminalStructure =
+    /자판기|카드\s*단말기|카드\s*투입구|선택\s*버튼|키오스크|키패드|터치패드/.test(text);
+  if (
+    isInteractiveTerminalStructure &&
+    (taggedMode === "WALKING_SAFETY" || taggedMode === "SMART_READER")
+  ) {
+    return "KIOSK_COACH";
+  }
+
+  const isGroceryPriceStructure =
+    /1\+1|2\+1|제로\s*슈거|제로슈거|가격표|가격은|\d[\d,]*\s*(?:원|달러)|행사\s*상품|도시락/.test(
       text,
-    ) &&
+    ) || Boolean(slots.promo);
+  if (isGroceryPriceStructure && taggedMode === "WALKING_SAFETY") {
+    return "GROCERY_SCANNER";
+  }
+
+  const isOutdoorPedestrianStructure =
+    /보도|인도|점자블록|연석|차도|가로수|울타리|갈림길|볼라드|킥보드|횡단보도|걸음\s*(?:앞|정도)/.test(
+      text,
+    );
+  if (
+    isOutdoorPedestrianStructure &&
+    (taggedMode === "SMART_READER" || taggedMode === "INDOOR_SPACE")
+  ) {
+    return "WALKING_SAFETY";
+  }
+
+  const isContainerOrLabelStructure =
+    !isOutdoorPedestrianStructure &&
+    !isApplianceStructure &&
+    !isInteractiveTerminalStructure &&
+    /손에\s*(?:쥐고|들고|든)|냉장고|선반|용기|포장|라벨|책\s*표지|표기|인쇄|적혀|쓰여|유통기한|소비기한|제조일|납부|송장|영수증|지폐|화폐|천\s*원|만\s*원|복용|점안액|출입카드|출입증|신분증|모니터\s*화면|에러\s*창|오류\s*화면|윈도우|캡차|제품|카메라를.*(?:멀리|가까이|돌려)|초점이|빛\s*반사|(?:윗|옆|뒷|바닥|뚜껑)\s*면|(?:통|병|캔|팩|봉지|튜브|상자|봉투|카드)(?:이|가|에|을|를|은|는|의|\s)/.test(
+      text,
+    );
+  if (
+    isContainerOrLabelStructure &&
     (taggedMode === "WALKING_SAFETY" || taggedMode === "RESTROOM_AND_SEAT")
   ) {
     return "SMART_READER";
@@ -551,12 +592,18 @@ export class StatefulSkillHarness {
       if (/환승\s*통로|출구/.test(q)) activeSet.add("TRANSFER_CORRIDOR");
       if (/화장실|빈\s*칸|세면대|빈\s*좌석|빈자리|카페/.test(q)) activeSet.add("RESTROOM_AND_SEAT");
       if (/엘리베이터|키오스크|버튼|몇\s*cm/.test(q)) activeSet.add("KIOSK_COACH");
-      if (/인덕션|잔열|화구|정수기|온수|세탁기|전자레인지|가전/.test(q)) activeSet.add("APPLIANCE_SAFETY");
-      if (/약봉지|안약|소비기한|유통기한|고지서|택배/.test(q)) activeSet.add("SMART_READER");
-      if (/마트|편의점|1\+1|제로|가격|맛|음료|상품/.test(q)) activeSet.add("GROCERY_SCANNER");
+      if (/인덕션|잔열|화구|정수기|온수|세탁기|전자레인지|보일러|온도조절기|리모컨|가전/.test(q)) activeSet.add("APPLIANCE_SAFETY");
+      if (/약봉지|안약|소비기한|유통기한|날짜|고지서|택배|지폐|화폐|영수증|모니터|화면|글자|읽어/.test(q)) activeSet.add("SMART_READER");
+      if (/마트|편의점|1\+1|제로|가격|맛|음료|식품|캔|통조림|상품/.test(q)) activeSet.add("GROCERY_SCANNER");
       if (/반찬|식탁|접시|식판|가시|밥|식사/.test(q)) activeSet.add("DINING_ASSISTANT");
-      if (/기억|에어팟|안경|열쇠|지갑|옷|얼룩|복장/.test(q)) activeSet.add("INDOOR_SPACE");
+      if (/기억|에어팟|안경|열쇠|지갑|옷|얼룩|색상|무늬|전등|불\s*켜|복장/.test(q)) activeSet.add("INDOOR_SPACE");
       if (/명함|악수|슬라이드|회의|발표/.test(q)) activeSet.add("SOCIAL_MEETING");
+      // Mined from 4,319 VizWiz questions (43.6% generic 'What is this?' queries): ensure ILS skills are active when no outdoor route is set!
+      if (activeSet.size === 0 && !this.activeMission && !/보행|인도|차도|계단|신호등|역|버스/.test(q)) {
+        activeSet.add("SMART_READER");
+        activeSet.add("GROCERY_SCANNER");
+        activeSet.add("INDOOR_SPACE");
+      }
     }
 
     if (this.stickyMode !== "SUBWAY_ON_BOARD") {
@@ -602,8 +649,11 @@ export class StatefulSkillHarness {
           `• [${skill.id}] (${skill.labelKo}): ${skill.triggerDescriptionKo}\n${pbText}`,
         );
       } else {
+        const quickRule = skill.expertPlaybook?.realLifeValueFormula
+          ? ` — ${skill.expertPlaybook.realLifeValueFormula}`
+          : "";
         fallbackTriggers.push(
-          `• [${skill.id}]: ${skill.triggerDescriptionKo}`,
+          `• [${skill.id}]: ${skill.triggerDescriptionKo}${quickRule}`,
         );
       }
     }

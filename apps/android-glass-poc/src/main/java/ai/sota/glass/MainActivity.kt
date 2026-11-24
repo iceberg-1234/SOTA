@@ -185,6 +185,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
     @Volatile
     private var inferenceEpoch: Int = 0
     private var lastSpokenText: String? = null
+    private var lastPassiveSpokenAtMs: Long = 0L
+
+    private fun isRedundantPassiveSpeech(prev: String?, next: String): Boolean {
+        if (prev.isNullOrBlank()) return false
+        if (prev.trim() == next.trim()) return true
+        val tokensA = prev.replace(Regex("[^가-힣0-9A-Za-z\\s]"), "").split(Regex("\\s+")).filter { it.length >= 2 }.toSet()
+        val tokensB = next.replace(Regex("[^가-힣0-9A-Za-z\\s]"), "").split(Regex("\\s+")).filter { it.length >= 2 }.toSet()
+        if (tokensA.size < 3 || tokensB.size < 3) return false
+        val overlap = tokensA.intersect(tokensB).size.toDouble() / minOf(tokensA.size, tokensB.size).toDouble()
+        return overlap >= 0.78
+    }
 
     companion object {
         private const val REQ_PERMS = 1001
@@ -198,11 +209,80 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             WayfindingNavigator.currentLng = loc.longitude
             WayfindingNavigator.hasGpsFix = true
             updateActiveNavBannerUi()
+            val milestoneSpeech = WayfindingNavigator.pollDeterministicGpsMilestoneSpeech(this@MainActivity)
+            if (!milestoneSpeech.isNullOrBlank()) {
+                updateGlassHudBanner("GPS_NAV", 12L, milestoneSpeech)
+                if (GeminiLiveSessionManager.isLiveActive()) {
+                    GeminiLiveSessionManager.speakProactiveAlertOverLiveSession(milestoneSpeech)
+                } else {
+                    speakNative(milestoneSpeech, autoListenAfter = false)
+                }
+            }
+            // Auto-activate Silent Station-Entrance Watch when approaching <= 70m of boarding station!
+            val activeRt = WayfindingNavigator.activeRoute
+            if (activeRt != null && activeRt.isConfirmedByUser && !activeRt.hasBoardedSubway &&
+                GeminiLiveSessionManager.isLiveActive() && GeminiLiveSessionManager.activeWatchTarget == null
+            ) {
+                val boardPt = activeRt.firstBoardingPoint
+                if (boardPt != null) {
+                    val dMeters = FloatArray(1)
+                    Location.distanceBetween(loc.latitude, loc.longitude, boardPt.lat, boardPt.lng, dMeters)
+                    if (dMeters[0] <= 70f) {
+                        GeminiLiveSessionManager.startSilentTargetWatch("${boardPt.name} 지하철 출입구 계단 또는 표지판", 90_000L)
+                    }
+                }
+            }
         }
         override fun onProviderEnabled(provider: String) {}
         override fun onProviderDisabled(provider: String) {}
         @Deprecated("Deprecated in Java")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+    }
+
+    private val liveSessionCallbacks = object : GeminiLiveSessionManager.LiveUiCallbacks {
+        override fun captureStreamFrameJpegBase64(): String? = grabCameraFrameJpeg(640, 480, 70)
+        override fun captureHighResFrameJpegBase64(): String? = grabCameraFrameJpeg(1280, 960, 88)
+
+        override fun onLiveStatusChanged(connected: Boolean, statusText: String) {
+            glassTouchpadStatusTv.text = statusText
+            glassHudModeBadge.text = "⚡ GEMINI LIVE · ${GeminiLiveSessionManager.currentFocusMode.labelEn}"
+        }
+
+        override fun onLiveInputHearing(partialUserText: String) {
+            glassTouchpadStatusTv.text = "👂 Hearing: \"$partialUserText\""
+        }
+
+        override fun onNavigationStateChanged() {
+            updateActiveNavBannerUi()
+        }
+
+        override fun onLiveTranscriptTurn(
+            modeBadge: String,
+            userText: String,
+            assistantText: String,
+            latencyMs: Long,
+            frameB64: String?
+        ) {
+            lastSpokenText = assistantText
+            val display = if (userText.isNotBlank()) "[Live Mic: $userText] → $assistantText" else assistantText
+            updateGlassHudBanner(modeBadge, latencyMs, display)
+            glassTouchpadStatusTv.text = "🟢 Live Streaming (${latencyMs}ms · Speak anytime to interrupt)"
+            val liveReply = NativeSotaAiClient.AutoAiReply(
+                ok = true,
+                model = "gemini-3.8-live",
+                detectedModeTag = modeBadge,
+                detectedModeLabelKo = GeminiLiveSessionManager.currentFocusMode.badgeKo,
+                activeWindowSummary = "GEMINI_LIVE_STREAM_AND_TOOLS",
+                earconKind = EarconKind.TARGET_FOUND,
+                spokenKorean = display,
+                latencyMs = latencyMs
+            )
+            syncExecutor.execute {
+                val saved = FeedbackLogStore.addEntry(this@MainActivity, liveReply, frameB64)
+                FeedbackLogStore.trySyncToServerAsync(this@MainActivity)
+                runOnUiThread { prependEntryCard(saved) }
+            }
+        }
     }
 
     private val realtimeLoopRunnable = object : Runnable {
@@ -220,8 +300,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        volumeControlStream = android.media.AudioManager.STREAM_MUSIC
         tts = TextToSpeech(this, this)
         requestRuntimePermissionsIfNeeded()
+        // Start clean without auto-resuming stale navigation routes from older test sessions!
+        WayfindingNavigator.clearRoute(this)
+        NativeSotaAiClient.startOrClearMission("")
         startGpsAndCompassTracking()
 
         val root = LinearLayout(this).apply {
@@ -611,7 +695,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             ).apply { setMargins(0, 0, 0, 12) }
         }
         glassHudModeBadge = TextView(this).apply {
-            text = "👓 GLIMMER HUD · Ready (Vol UP = Talk | Vol DOWN = Snap)"
+            text = "👓 GLIMMER HUD · Ready (Touchpad + Hands-Free Voice)"
             setTextColor(Color.parseColor("#38BDF8"))
             textSize = 11.5f
             typeface = Typeface.DEFAULT_BOLD
@@ -623,8 +707,45 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             typeface = Typeface.DEFAULT_BOLD
             setPadding(0, 8, 0, 0)
         }
+        // Focused 3+1 Companion Mode Bar (See & Read · Act & Guide · Memory · Auto)
+        val focusModeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 10) }
+        }
+        val focusButtons = mutableListOf<Pair<GeminiLiveSessionManager.FocusMode, Button>>()
+        fun refreshFocusModeButtons() {
+            for ((m, btn) in focusButtons) {
+                val active = GeminiLiveSessionManager.currentFocusMode == m
+                btn.setBackgroundColor(if (active) Color.parseColor("#38BDF8") else Color.parseColor("#1E293B"))
+                btn.setTextColor(if (active) Color.BLACK else Color.WHITE)
+            }
+        }
+        for (fMode in GeminiLiveSessionManager.FocusMode.entries) {
+            val b = Button(this).apply {
+                text = fMode.labelEn
+                textSize = 11f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(6, 10, 6, 10)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(3, 0, 3, 0)
+                }
+                setOnClickListener {
+                    GeminiLiveSessionManager.setFocusMode(this@MainActivity, fMode, if (aiEnabled) liveSessionCallbacks else null)
+                    refreshFocusModeButtons()
+                    glassHudModeBadge.text = "⚡ MODE · ${fMode.labelEn} (${fMode.badgeKo})"
+                }
+            }
+            focusButtons.add(fMode to b)
+            focusModeRow.addView(b)
+        }
+        refreshFocusModeButtons()
+
         hudCard.addView(glassHudModeBadge)
         hudCard.addView(glassHudSpeechTv)
+        panel.addView(focusModeRow)
 
         // 2. Giant Eyes-Free Temple Touchpad Surface (Google Android XR AI Glasses Gesture Spec)
         val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
@@ -633,6 +754,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 val isSpeaking = tts?.isSpeaking == true
                 val activeRt = WayfindingNavigator.activeRoute
+                if (GeminiLiveSessionManager.isLiveActive()) {
+                    GeminiLiveSessionManager.interruptPlaybackBargeIn()
+                    SpatialEarconSynthesizer.play(EarconKind.BARGE_IN_ACK)
+                    glassTouchpadStatusTv.text = "✋ [Tap] Live audio muted (Barge-in ready)"
+                    return true
+                }
                 if (isSpeaking) {
                     tts?.stop()
                     SpatialEarconSynthesizer.play(EarconKind.BARGE_IN_ACK)
@@ -652,8 +779,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 tts?.stop()
-                glassTouchpadStatusTv.text = "📸 [Double-Tap] Analyzing camera frame..."
-                runSingleInferenceStep()
+                if (GeminiLiveSessionManager.isLiveActive()) {
+                    glassTouchpadStatusTv.text = "📸 [Double-Tap] Sending 1280px High-Res Snap to Gemini Live..."
+                    GeminiLiveSessionManager.sendUserPromptAndHighResSnap(
+                        "지금 정면 고해상도 화면에서 핵심 사물과 글자, 숫자를 정확히 확인해 알려줘.",
+                        liveSessionCallbacks
+                    )
+                } else {
+                    glassTouchpadStatusTv.text = "📸 [Double-Tap] Analyzing camera frame..."
+                    runSingleInferenceStep()
+                }
                 return true
             }
 
@@ -709,7 +844,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             typeface = Typeface.DEFAULT_BOLD
         }
         glassTouchpadStatusTv = TextView(this).apply {
-            text = "Ready — Hold Touchpad or press Vol UP to speak"
+            text = "Ready — Turn Live Stream ON and speak freely, or Hold Touchpad"
             setTextColor(Color.parseColor("#00E676"))
             textSize = 15.5f
             typeface = Typeface.DEFAULT_BOLD
@@ -739,7 +874,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             gravity = Gravity.CENTER
         }
         val padGuide = TextView(this).apply {
-            text = "• Single Tap: Mute Speech / Repeat / Confirm Route\n• Touch & Hold: 🎙️ Ask SOTA (Voice Query)\n• Double Tap: 📸 Instant Camera Snap\n• Swipe L/R: Cycle Candidates / Toggle Live AI\n• Hardware Vol UP: Talk | Vol DOWN: Snap (2x = Live AI)"
+            text = "• Single Tap: Mute Speech / Repeat / Confirm Route\n• Touch & Hold: 🎙️ Ask SOTA (or Speak Freely when Live Stream ON)\n• Double Tap: 📸 1280px High-Res Camera Snap\n• Swipe L/R: Cycle Candidates / Toggle Live Stream"
             setTextColor(Color.parseColor("#CBD5E1"))
             textSize = 12.5f
             gravity = Gravity.CENTER
@@ -816,40 +951,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         if (!::glassHudModeBadge.isInitialized) return
         glassHudModeBadge.text = "👓 [$modeTag] · ${latencyMs}ms"
         glassHudSpeechTv.text = spoken
-    }
-
-    /**
-     * Hardware Button Mapping in `👓 글래스 실착용 모드` (Simulates Google Android XR AI Glasses side buttons):
-     * - Physical Volume UP -> Immediate Barge-in + Push-to-Talk Voice Query (`Invoke AI`)
-     * - Physical Volume DOWN (Single press) -> Instant 1-Frame Camera Vision Snap
-     * - Physical Volume DOWN (Double press < 450ms) -> `TOGGLE_APP_CAMERA` Continuous Companion ON/OFF
-     */
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (isGlassWearableMode && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_VOLUME_UP -> {
-                    isRecordingVoiceFeedback = false
-                    glassTouchpadStatusTv.text = "🎙️ [Vol UP] Listening — Ask SOTA now..."
-                    startInlineVoiceListening()
-                    return true
-                }
-                KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                    val now = System.currentTimeMillis()
-                    if (now - lastVolDownPressMs < 450L) {
-                        setAiToggleState(!aiEnabled)
-                        glassTouchpadStatusTv.text = if (aiEnabled) "🟢 [2x Vol DOWN] Live AI ON" else "🔴 [2x Vol DOWN] Live AI OFF"
-                        lastVolDownPressMs = 0L
-                    } else {
-                        lastVolDownPressMs = now
-                        tts?.stop()
-                        glassTouchpadStatusTv.text = "📸 [Vol DOWN] Analyzing camera frame..."
-                        runSingleInferenceStep()
-                    }
-                    return true
-                }
-            }
-        }
-        return super.dispatchKeyEvent(event)
     }
 
     private fun renderUseCaseCategoryTabsAndChips() {
@@ -1330,13 +1431,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
 
     private fun startConfirmedMissionExecution() {
         val startSpeech = WayfindingNavigator.activateConfirmedRoute()
+        WayfindingNavigator.persistActiveRoute(this)
         candidateConfirmBox.visibility = View.GONE
         updateActiveNavBannerUi()
-        aiEnabled = true
-        aiToggleBtn.text = "🟢 Live AI: ON"
-        aiToggleBtn.setBackgroundColor(Color.parseColor("#00E676"))
-        aiToggleBtn.setTextColor(Color.BLACK)
-        openRearCamera()
         SpatialEarconSynthesizer.play(EarconKind.SIGNAL_GREEN)
         speakNative(startSpeech)
         logDialogueTurnAsFeedbackCard(
@@ -1346,8 +1443,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             agentSpoken = startSpeech,
             latencyMs = 50L
         )
-        mainHandler.removeCallbacks(realtimeLoopRunnable)
-        mainHandler.postDelayed(realtimeLoopRunnable, 1200L)
+        setAiToggleState(true)
     }
 
     private fun updateActiveNavBannerUi() {
@@ -1417,22 +1513,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
     private fun setAiToggleState(enabled: Boolean) {
         aiEnabled = enabled
         mainHandler.removeCallbacks(realtimeLoopRunnable)
+        tts?.stop()
 
         if (aiEnabled) {
-            aiToggleBtn.text = "🟢 Live AI: ON"
+            aiToggleBtn.text = "🟢 Live Stream: ON"
             aiToggleBtn.setBackgroundColor(Color.parseColor("#00E676"))
             aiToggleBtn.setTextColor(Color.BLACK)
             openRearCamera()
             SpatialEarconSynthesizer.play(EarconKind.SIGNAL_GREEN)
-            runSingleInferenceStep(userQuery = "")
-            mainHandler.postDelayed(realtimeLoopRunnable, REALTIME_INTERVAL_MS)
+            GeminiLiveSessionManager.startSession(this, liveSessionCallbacks)
         } else {
-            aiToggleBtn.text = "🔴 Live AI: OFF"
+            aiToggleBtn.text = "🔴 Live Stream: OFF"
             aiToggleBtn.setBackgroundColor(Color.parseColor("#3B1219"))
             aiToggleBtn.setTextColor(Color.parseColor("#FFD7D7"))
+            GeminiLiveSessionManager.stopSession()
             stopInlineVoiceListening()
             tts?.stop()
             SpatialEarconSynthesizer.play(EarconKind.BARGE_IN_ACK)
+            glassTouchpadStatusTv.text = "⏸️ Live Stream paused — Tap Live Stream ON or Hold Touchpad"
         }
     }
 
@@ -1440,6 +1538,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestRuntimePermissionsIfNeeded()
             return
+        }
+        // Prevent microphone collision! When Gemini Live Stream is ON, `AudioRecord` already streams the mic live — only pause Live mic if recording a `👎 Bad` feedback note!
+        if (GeminiLiveSessionManager.isLiveActive() && !isRecordingVoiceFeedback) {
+            GeminiLiveSessionManager.interruptPlaybackBargeIn()
+            SpatialEarconSynthesizer.play(EarconKind.BARGE_IN_ACK)
+            glassTouchpadStatusTv.text = "🎙️ Live Mic Active — Just speak freely now!"
+            return
+        }
+        if (GeminiLiveSessionManager.isLiveActive() && isRecordingVoiceFeedback) {
+            GeminiLiveSessionManager.setMicPausedForFeedback(true)
         }
         inferenceEpoch += 1
         requestInFlight = false
@@ -1470,6 +1578,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                             talkMicBtn.setTextColor(Color.parseColor("#FFD400"))
                         }
                         override fun onError(error: Int) {
+                            GeminiLiveSessionManager.setMicPausedForFeedback(false)
                             isListeningMic = false
                             talkMicBtn.text = "🎙️ Push-to-Talk"
                             talkMicBtn.setBackgroundColor(Color.parseColor("#1E293B"))
@@ -1477,10 +1586,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                             if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                                 launchSystemVoiceFallbackDialog()
                             } else if (::glassTouchpadStatusTv.isInitialized) {
-                                glassTouchpadStatusTv.text = "⚠️ Didn't catch that — Try holding or tapping Vol UP again"
+                                glassTouchpadStatusTv.text = "⚠️ Didn't catch that — Hold Touchpad to try again"
                             }
                         }
                         override fun onResults(results: Bundle?) {
+                            GeminiLiveSessionManager.setMicPausedForFeedback(false)
                             isListeningMic = false
                             talkMicBtn.text = "🎙️ Push-to-Talk"
                             talkMicBtn.setBackgroundColor(Color.parseColor("#1E293B"))
@@ -1680,8 +1790,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
             }
         }
 
-        // LUM-148 & LUM-149: Never route vision/reading/expiry/memory/inspection utterances to TMAP destination search!
-        val isVisionOrMemoryRequest = Regex("읽어|유통기한|소비기한|제조일자|기한|날짜|글씨|글자|기억|외워|어디\\s*있어|보여|보이는|뭐야|뭔지|상황\\s*설명|반찬|우유|주스|약봉지|안약|영양제|카드|인덕션|얼룩|청소기").containsMatchIn(spoken)
+        // LUM-148, 149 & SOT-158, 161: Never route vision/item-finding/expiry/memory/vending utterances to TMAP destination search!
+        val isVisionOrMemoryRequest = Regex("읽어|유통기한|소비기한|제조일자|기한|날짜|글씨|글자|체크해|기억|외워|어디\\s*있어|몇\\s*번째\\s*칸|어떤게|보여|보이는|뭐야|뭔지|상황\\s*설명|물\\s*찾아|고추장|된장|쌈장|반찬|우유|주스|생수|자판기|정수기|샴푸|린스|약봉지|안약|영양제|카드|인덕션|얼룩|청소기").containsMatchIn(spoken)
         if (isVisionOrMemoryRequest) {
             runSingleInferenceStep(userQuery = spoken)
             return
@@ -1748,17 +1858,32 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
         return Triple(isTooDark, isLowLight, hasHighGlare)
     }
 
+    private fun grabCameraFrameJpeg(width: Int, height: Int, quality: Int): String? {
+        if (!cameraTextureView.isAvailable) return null
+        val bmp: Bitmap = cameraTextureView.getBitmap(width, height) ?: return null
+        val baos = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.JPEG, quality, baos)
+        return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+    }
+
     private fun grabCurrentCameraFrame(): CapturedFrameResult {
         if (!cameraTextureView.isAvailable) return CapturedFrameResult(null, false, false, false)
-        val bmp: Bitmap = cameraTextureView.getBitmap(512, 384) ?: return CapturedFrameResult(null, false, false, false)
+        val bmp: Bitmap = cameraTextureView.getBitmap(1024, 768) ?: return CapturedFrameResult(null, false, false, false)
         val (tooDark, lowLight, highGlare) = analyzeFrameLuminance(bmp)
         val baos = ByteArrayOutputStream()
-        bmp.compress(Bitmap.CompressFormat.JPEG, 72, baos)
+        bmp.compress(Bitmap.CompressFormat.JPEG, 85, baos)
         val b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
         return CapturedFrameResult(b64, tooDark, lowLight, highGlare)
     }
 
     private fun runSingleInferenceStep(userQuery: String = "") {
+        if (GeminiLiveSessionManager.isLiveActive()) {
+            GeminiLiveSessionManager.sendUserPromptAndHighResSnap(
+                userQuery.ifBlank { "지금 눈앞에 보이는 대상과 글자를 정확히 확인해 알려줘." },
+                liveSessionCallbacks
+            )
+            return
+        }
         // LUM-142 & LUM-144: NEVER drop an explicit user voice/text query even if a background vision request was in flight!
         if (userQuery.isBlank() && (requestInFlight || isListeningMic)) return
         if (userQuery.isNotBlank()) {
@@ -1816,9 +1941,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                 } else {
                     reply.spokenKorean
                 }
+                val prevSpoken = lastSpokenText
+                val nowMs = System.currentTimeMillis()
+                val isDuplicatePassive = userQuery.isBlank() &&
+                    reply.earconKind != EarconKind.HAZARD_ALERT &&
+                    (nowMs - lastPassiveSpokenAtMs < 11_000L) &&
+                    isRedundantPassiveSpeech(prevSpoken, reply.spokenKorean)
+
                 lastSpokenText = reply.spokenKorean
                 updateGlassHudBanner(reply.detectedModeTag, reply.latencyMs, displaySpoken)
-                glassTouchpadStatusTv.text = "✅ Completed (${reply.latencyMs}ms)"
+                glassTouchpadStatusTv.text = if (isDuplicatePassive) {
+                    "🔇 Unchanged scene — speech suppressed (${reply.latencyMs}ms)"
+                } else {
+                    "✅ Completed (${reply.latencyMs}ms)"
+                }
 
                 // Execute Single-Pass LLM Tool Call (`NAV_CONTROL`) if Gemini emitted a navigation action!
                 if (!reply.navAction.isNullOrBlank()) {
@@ -1877,15 +2013,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
                     }
                 }
 
-                if (aiEnabled || userQuery.isNotBlank()) {
+                if ((aiEnabled || userQuery.isNotBlank()) && !isDuplicatePassive) {
+                    if (userQuery.isBlank()) lastPassiveSpokenAtMs = nowMs
                     SpatialEarconSynthesizer.play(reply.earconKind)
                     speakNative(reply.spokenKorean, autoListenAfter = false)
+                } else if (isDuplicatePassive && aiEnabled) {
+                    mainHandler.removeCallbacks(realtimeLoopRunnable)
+                    mainHandler.postDelayed(realtimeLoopRunnable, REALTIME_INTERVAL_MS)
                 }
             }
 
             // Persist and sync asynchronously on low-priority syncExecutor so it NEVER delays speech or next inference!
             val loggedReply = if (userQuery.isNotBlank() && !userQuery.startsWith("(")) {
-                reply.copy(spokenKorean = "[내 질문: $userQuery] → ${reply.spokenKorean}")
+                reply.copy(spokenKorean = "[Query: $userQuery] → ${reply.spokenKorean}")
             } else {
                 reply
             }
@@ -2243,6 +2383,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener, SensorEventListene
 
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
+        GeminiLiveSessionManager.stopSession()
         try { locationManager?.removeUpdates(gpsListener) } catch (_: Exception) {}
         try { sensorManager?.unregisterListener(this) } catch (_: Exception) {}
         try { speechRecognizer?.destroy() } catch (_: Exception) {}

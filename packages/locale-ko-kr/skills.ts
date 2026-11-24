@@ -39,15 +39,15 @@ export function createKoreanSkillPlugins(
         "`[WALKING_SAFETY | hazard=킥보드, steps=3, avoidDir=왼쪽, shoreline=점자블록]`",
       expertPlaybook: {
         visualScanChecklist: [
-          "1. Ground-level obstacles on or near tactile paving (점자블록) or curb",
-          "2. Continuity/breaks in tactile paving or outdoor cafe tables encroaching the sidewalk",
-          "3. Floor flatness and wall/handrail shoreline in dim lighting (UC-18)",
+          "1. Image-LEFT vs Image-RIGHT strictly from pixels (e.g. fence/building on left vs street trees/curb/roadway on right — SOT-172)",
+          "2. Roadway/curb edge (`가로수/연석/차도`) vs safe inner sidewalk (`건물/울타리 쪽 보도`)",
+          "3. Subway station entrance pole-sign, stairs, or elevator when within 75m of boarding station (SOT-168, 170)",
         ],
         realLifeValueFormula:
-          "[Obstacle + steps ahead] -> [Avoidance side & steps] -> [Shoreline Re-alignment: how to return to tactile paving, curb, or wall after passing the obstacle]",
+          "NEVER say repetitive '4~5걸음 더 걸어가볼까요?' on open sidewalks! State [Remaining meters/minutes to station or turn] + [Safe inner building/fence shoreline] OR [Obstacle avoidance AWAY from roadway curb]",
         confounderAndSafetyGuards: [
-          "NEVER classify indoor household items (refrigerator, bottle, desk, food) as WALKING_SAFETY",
-          "Always tell the user how to re-align with the tactile block or wall after dodging an obstacle so they do not drift into the road or outdoor tables",
+          "CRITICAL ROADWAY SAFETY (SOT-173, 174): NEVER tell the user to dodge toward the roadway/curb/street-tree side (`차도 쪽 회피 절대 금지`)! Always guide toward the safe inner building/fence side or ask them to pause briefly",
+          "NEVER classify indoor items, vending machines, water dispensers, or food tubs as WALKING_SAFETY",
         ],
         physicalAimingGuide:
           "Keep head level facing your walking direction; sweep cane slightly wider when tactile blocks break.",
@@ -120,6 +120,21 @@ export function createKoreanSkillPlugins(
       relatedSkillIds: ["WALKING_SAFETY", "BUS_STOP"],
       priority: "P0_SAFETY",
       earcon: "SIGNAL_GREEN",
+      executePostProcess: async (obs) => {
+        const sig = (obs.extractedSlots.signal || "").toUpperCase();
+        const secRaw =
+          obs.extractedSlots.remainSec ||
+          /(\d+)\s*초/.exec(obs.draftSpokenKorean)?.[1];
+        const sec = secRaw ? Number(secRaw) : undefined;
+        if (sig === "BLINKING" || (sig === "GREEN" && sec !== undefined && sec >= 1 && sec <= 9)) {
+          const secNote =
+            sec !== undefined
+              ? `남은 시간이 ${sec}초로 짧아 `
+              : "초록불이 깜빡이고 있어 ";
+          return `잠시 기다리세요! ${secNote}지금 건너기 시작하면 중간에 신호가 바뀌어 위험해요. 다음 초록불에 안전하게 건너세요.`;
+        }
+        return obs.draftSpokenKorean;
+      },
     },
     {
       id: "BUS_STOP",
@@ -409,17 +424,18 @@ export function createKoreanSkillPlugins(
         "`[KIOSK_COACH | target=1층버튼|메뉴명, dxCm=3, dyCm=-2, floorLit=false]`",
       expertPlaybook: {
         visualScanChecklist: [
-          "1. Screen state (Start screen, menu grid, payment popup) or elevator/keypad button layout",
-          "2. User's index fingertip position relative to the target button in centimeters (dxCm, dyCm)",
-          "3. Physical card slot, NFC tap pad, or receipt dispenser location (usually bottom-right bezel)",
+          "1. If VENDING MACHINE (자판기 — SOT-159~162): read actual drink names by shelf row ('맨 위칸 생수·이온음료, 둘째 칸 콜라...') so blind user knows what is inside",
+          "2. For vending purchase ('물 찾아줘'): locate right-middle payment card reader, selection button directly beneath the target drink, and bottom pickup slot",
+          "3. For kiosks/keypads/elevators: check 1F lit state first and measure fingertip-to-button cm offset (dxCm, dyCm)",
         ],
         realLifeValueFormula:
-          "[Current screen/floor status (check 1F lit first on elevators)] + [Fingertip-to-target cm offset; if hand not visible, anchor hand to bottom-right bezel first] + [Card slot location]",
+          "On Vending Machines: NEVER say '꺼내 드릴까요?' (locked behind glass!) — deliver [Shelf row drinks] + [Card reader tap -> Selection button below drink -> Bottom pickup slot]. On Kiosks: [cm offset from finger + card slot].",
         confounderAndSafetyGuards: [
-          "On apartment touch keypads, verify exact digit alignment before telling the user to press so they never ring the wrong neighbor",
+          "NEVER offer to pull out an item from a locked vending machine without guiding payment & button press",
+          "On apartment touch keypads, verify exact digit alignment before telling the user to press",
         ],
         physicalAimingGuide:
-          "Stand an arm's length from the screen and place one finger lightly on the outer bezel edge so SOTA can see both the screen and your finger.",
+          "Stand an arm's length from the screen/vending machine and place one finger lightly on the outer bezel or right panel.",
       },
       relatedSkillIds: ["INDOOR_SPACE", "APPLIANCE_SAFETY"],
       priority: "P1_NAVIGATION",
@@ -490,9 +506,9 @@ export function createKoreanSkillPlugins(
         "`[SMART_READER | docType=소비기한|약봉지|고지서, product=..., expiryDate=YYYY-MM-DD, dateType=EXPIRY|MANUFACTURED, unreadableReason=TOO_CLOSE_BLUR|OCCLUDED_BY_HAND|WRONG_SIDE]`",
       expertPlaybook: {
         visualScanChecklist: [
-          "1. Exact item identity: brand, flavor/type, volume, OR oral medicine vs eyedrop/external ointment, OR spam flyer vs real utility bill/parcel",
-          "2. For bottles/containers in fridge: check if cap seal is already opened and approximate remaining liquid/food level (e.g. 절반 남음) so user does not spill",
-          "3. Scan cap neck, top gable seam, or side box for stamped `소비기한/유통기한` (strictly separated from `제조일자`); for medicine pouches, read morning/lunch/evening icons or pharmacy handwriting",
+          "1. Exact item identity: brand/flavor/volume, shampoo vs conditioner/body-wash/cleaner, oral med vs eyedrop, paper currency denomination (verify unfolded digits + portrait!), OR frozen PC/phone screen message (when VoiceOver/NVDA cannot read)",
+          "2. Multi-Object Independence: when multiple containers appear in view, read ONLY characters directly legible on each individual label — never infer an adjacent/lower item's name",
+          "3. Multi-Date Disambiguation: scan ALL printed date lines from top to bottom! When two dates appear stacked, a date paired with a `HH:mm` timestamp (e.g. `YYYY.MM.DD 11:25`), lot code, or earlier year is the Manufacturing Date (`제조일자`), whereas the LATER date below it (or marked `까지`/`소비기한`) is the true Expiration Date (`expiryDate`)",
         ],
         realLifeValueFormula:
           "NO shallow captioning ('주스 병이 보이네요')! Deliver: [Exact Product/Med Name & Dosage/Flavor] + [Opened/Remaining amount if container] + [Expiry D-Day OR exact part of bottle/box to rotate if date is hidden]",
@@ -538,30 +554,37 @@ export function createKoreanSkillPlugins(
           : null;
         if (
           (isValidObservedSlot(expiryDate) && !isValidRealIsoDate(expiryDate!)) ||
-          (bodyIso && (!isValidRealIsoDate(bodyIso) || !isValidObservedSlot(expiryDate)))
+          (bodyIso && !isValidRealIsoDate(bodyIso))
         ) {
           const isIceCream = /투게더|아이스크림|빙과/.test(
             `${product ?? ""} ${obs.draftSpokenKorean}`,
           );
+          const prodPrefix =
+            product && product !== "제품" ? `${product} 제품이지만 ` : "";
           return isIceCream
             ? `${product || "아이스크림"} 제품이에요. 지금 비추신 면에는 날짜가 보이지 않아요. 아이스크림은 주로 뚜껑 테두리나 바닥 면에 제조일자가 찍혀 있으니 용기 아래쪽을 비춰 보실래요?`
-            : `${product || "제품"}이지만 지금 각도에서는 소비기한 숫자가 선명하게 보이지 않아요. 용기 위쪽이나 옆면을 천천히 돌려 비춰 보실래요?`;
+            : `${prodPrefix}지금 각도에서는 소비기한 숫자가 선명하게 보이지 않아요. 용기 위쪽이나 옆면을 천천히 돌려 비춰 보실래요?`;
         }
         const dateType = (obs.extractedSlots.dateType || "EXPIRY").toUpperCase();
         if (dateType === "MANUFACTURED") {
-          return `${product || "상품"}의 제조일자가 ${expiryDate}로 적혀 있어요. 소비기한은 용기 옆면이나 병목 위쪽에 따로 적혀 있으니 살짝 돌려 비춰 보실래요?`;
+          return `${product || "상품"}의 제조일자가 ${expiryDate}로 적혀 있어요. 소비기한은 그 아래 줄이나 용기 다른 면에 따로 적혀 있으니 살짝 돌려 비춰 보실래요?`;
         }
-        if (
-          isValidObservedSlot(expiryDate) &&
-          /^\d{4}-\d{2}-\d{2}$/.test(expiryDate!) &&
-          isValidObservedSlot(product)
-        ) {
+        const resolvedIso =
+          isValidObservedSlot(expiryDate) && /^\d{4}-\d{2}-\d{2}$/.test(expiryDate!)
+            ? expiryDate!
+            : !obs.draftSpokenKorean.includes("제조")
+              ? bodyIso
+              : null;
+        if (resolvedIso) {
           const todayIso = new Date().toISOString().slice(0, 10) + "T00:00:00Z";
-          return smartReader.summarizeFoodExpiry({
-            productName: product!,
-            expiryDateIso: expiryDate!,
+          const res = smartReader.summarizeFoodExpiry({
+            productName: product || "이 제품",
+            expiryDateIso: resolvedIso,
             referenceTodayIso: todayIso,
-          }).spokenKorean;
+          });
+          if (res.isExpired || isValidObservedSlot(expiryDate)) {
+            return res.spokenKorean;
+          }
         }
         return obs.draftSpokenKorean;
       },

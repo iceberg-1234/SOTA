@@ -70,7 +70,7 @@ We dream of a world where:
 
 | Phase       | Milestone                                              | Status          | Scope                                                                                                                                                                                                                                                                                                                                               |
 | :---------- | :----------------------------------------------------- | :-------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase 1** | **`v0.2.0-poc` — Core Engine & Wearable Field Alpha**  | **In Progress** | • 2-Tier Context-Gated Micro-Skill Harness (`16+` skills, `23+` daily scenarios, `41/41` QA gates passing)<br>• Sub-2s multimodal vision pipeline (`gemini-3.5-flash-lite` minimal-thinking + Zero-Wait TTS)<br>• 3-Phase conversational wayfinding & initial `locale-ko-kr` pack<br>• Native Android APK (`ai.sota.glass`) & real-world validation toward **Google Intelligent AI Glasses** |
+| **Phase 1** | **`v0.2.0-poc` — Core Engine & Wearable Field Alpha**  | **In Progress** | • **4-Layer Model-Agnostic Live Companion Harness** (`51/51` QA gates, `18/18` integration tests, `4,400+` open-dataset audit)<br>• **Gemini Live Bidirectional Streaming** (`gemini-3.8-live` real-time voice/video + `1280px` High-Res Precision Snap + **Silent Active Target Watch**)<br>• **3+1 Core Companion Modes**: `See & Read`, `Act & Guide` (4-stage bezel-to-button FSM), `People & Object Memory` (persistent on-device DB), and **Map-Driven GPS Wayfinding + Silent Hazard Copilot**<br>• Native Android APK (`ai.sota.glass`) & real-world validation toward **Google Intelligent AI Glasses** |
 | **Phase 2** | **Global Reach for Blind Communities Worldwide**       | **Planned**     | • Expanding SOTA alongside contributors around the world so blind and low-vision people in every country and language can benefit in their own everyday lives                                                                                                                                                                                      |
 | **Phase 3** | **Always-On Companion & Universal Wearable Ecosystem** | **Planned**     | • Seamless, zero-dropout real-time companionship across open smart-glass hardware, combining continuous live perception with resilient on-device safety awareness even offline                                                                                                                                                                     |
 
@@ -79,31 +79,34 @@ We dream of a world where:
 
 ## Repository Structure & Architecture
 
-SOTA separates **multimodal VLM perception (Layer 1)** from **deterministic safety, spatial math, and calendar/transit verification (Layer 2)**:
+SOTA uses a **4-Layer Model-Agnostic Harness** paired with **Gemini Live bidirectional streaming (`BidiGenerateContent`)**, decoupling visual fact extraction from deterministic safety, spatial math, state progression, and persistent memory so behavior remains rock-solid even as underlying models evolve:
 
 ```text
-[1st-Person Camera + Mic + GPS/IMU]
-                │
-                ▼
-┌───────────────────────────────────────────────────────────────────┐
-│ Layer 1: Context-Gated Micro-Skill Router (English-Core Prompt)   │
-│  • Injects Tier-2 O&M/ILS Expert Playbooks ONLY for top ≤4 skills │
-│  • Keeps Tier-1 1-line scene switch directory for instant jump    │
-└───────────────────────────────┬───────────────────────────────────┘
-                                │ Structured Header `[SKILL_ID | key=val]` + Draft
-                                ▼
-┌───────────────────────────────────────────────────────────────────┐
-│ Layer 2: Deterministic Verification & Locale Post-Processors      │
-│  • Pluggable Global (Google Maps) / Regional Transit Providers    │
-│  • 15s TemporalSlotCache + Calendar/Stamp Anti-Hallucination      │
-│  • Physics-Aware View-Finding Coach (`OCCLUDED`, `WRONG_SIDE`)    │
-└───────────────────────────────┬───────────────────────────────────┘
-                                │
-                                ▼
-┌───────────────────────────────────────────────────────────────────┐
-│ Priority Audio Arbiter (`P0_SAFETY` > `P1_NAV` > `P2_COMPANION`)  │
-│  • Spatial earcons + instant barge-in on voice or temple tap      │
-└───────────────────────────────────────────────────────────────────┘
+[1st-Person Camera Stream + Live Mic (16kHz PCM) + GPS/IMU]
+                             │
+                             ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│ Layer A: Typed JSON Tool Contracts & Stateful Gemini Live Session     │
+│  • `inspect_visual_facts` + `capture_high_res_detail` (1280px OCR)    │
+│  • `track_hand_to_target` | `remember_entity` / `recall_entity`       │
+│  • `start_watching_target` (Silent Active Watch) & `search_destination`│
+└────────────────────────────┬──────────────────────────────────────────┘
+                             │ Strict JSON Tool Arguments (Model-Agnostic)
+                             ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│ Layer B & C: Stateful Workflow FSM + Deterministic Policy Verifiers   │
+│  • Multi-Date Disambiguation (`HH:mm` Mfg vs. Expiry) & Expired Alert │
+│  • 4-Stage Action FSM (Overview → Safe Bezel Anchor → cm Track → Tap) │
+│  • Persistent On-Device Entity DB (Objects · People · Spaces)         │
+│  • Map-Driven GPS Milestone Navigator + Silent Hazard/Entrance Watch  │
+└────────────────────────────┬──────────────────────────────────────────┘
+                             │
+                             ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│ Layer D: Runtime Output Guardrail & Echo-Gated 24kHz Live Audio       │
+│  • Speaker-echo suppression + single-tap instant barge-in             │
+│  • Blocks hallucinated calendar dates, roadway dodges & symbols       │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Directory Layout
@@ -111,25 +114,26 @@ SOTA separates **multimodal VLM perception (Layer 1)** from **deterministic safe
 ```text
 sota/
 ├── packages/
-│   ├── core/                  # Hardware- & country-agnostic runtime engine
-│   │   ├── agent-harness.ts   # 2-Tier Context-Gated Skill Router & 15s TemporalSlotCache
-│   │   ├── audio-arbiter.ts   # P0/P1/P2 priority speech preemption & barge-in
-│   │   ├── gemini-vision-agent.ts # Low-latency Gemini multimodal adapter
-│   │   ├── smart-reader.ts    # Expiry D-Day, medicine, grocery, appliance & social helpers
-│   │   ├── spatial-language.ts# Body-relative steps, cm fingertip coaching, tactile phrasing
-│   │   ├── transit-engine.ts  # Platform door math, bus queue & ride plate verifier
-│   │   └── visual-memory.ts   # Personal item landmark indexing & recall
-│   ├── hardware-adapters/     # Abstract interfaces for Camera, Mic, Open-Ear/Bone TTS, IMU
-│   └── locale-ko-kr/          # Reference Locale Pack (South Korea — 16 skills & local transit)
+│   ├── core/                        # Hardware-, locale-, and model-agnostic engine
+│   │   ├── live-companion-harness.ts# 4-Layer Model-Agnostic Harness, FSMs, Persistent Entity DB & Gemini Live WS
+│   │   ├── agent-harness.ts         # 2-Tier Context-Gated Micro-Skill Router & 15s TemporalSlotCache
+│   │   ├── audio-arbiter.ts         # P0/P1/P2 priority speech preemption & barge-in
+│   │   ├── gemini-vision-agent.ts   # Multi-model failover multimodal VLM adapter
+│   │   ├── smart-reader.ts          # Expiry D-Day, medicine, grocery, appliance & social helpers
+│   │   ├── spatial-language.ts      # Body-relative steps, cm fingertip coaching, tactile phrasing
+│   │   ├── transit-engine.ts        # Platform door math, bus queue & ride plate verifier
+│   │   └── visual-memory.ts         # Personal item landmark indexing & recall
+│   ├── hardware-adapters/           # Abstract interfaces for Camera, Mic, Open-Ear/Bone TTS, IMU
+│   └── locale-ko-kr/                # Reference Locale Pack (South Korea — 16+ skills & local transit)
 ├── apps/
-│   ├── android-glass-poc/     # Native Kotlin Android APK (`ai.sota.glass`) + XR Glass Simulator
-│   ├── companion-web/         # Zero-dependency Node HTTP server & browser test console
-│   └── scenario-simulator/    # Full-day scenario simulator (`run-day.ts`) & 41-gate QA (`qa-suite.ts`)
+│   ├── android-glass-poc/           # Native Kotlin Android APK (`ai.sota.glass`) + Gemini Live Streamer
+│   ├── companion-web/               # Zero-dependency Node HTTP server & browser test console
+│   └── scenario-simulator/          # 51-gate QA (`qa-suite.ts`), 5-Dataset Benchmark (`dataset-benchmark.ts`)
 ├── docs/
 │   └── LOCALIZATION_AND_SKILL_GUIDE.md # Guide for building Country Locale Packs & Micro-Skills
-├── .devin/skills/             # Reusable engineering skills (`sota-skill-architect`, `sota-github-pr`)
+├── .devin/skills/                   # Reusable engineering skills (`sota-skill-architect`, `sota-github-pr`)
 └── tests/
-    └── sota.test.ts           # End-to-end & unit test suite (Node native test runner)
+    └── sota.test.ts                 # 18 end-to-end & integration tests (Node native test runner)
 ```
 
 ---
@@ -144,8 +148,8 @@ sota/
 
 Offline unit tests (`npm test`) and simulations (`npm run simulate`) run out of the box without API keys. For live multimodal inference and routing:
 
-- **Core Multimodal Vision (All Regions)**:
-  - `GEMINI_API_KEY` — Google Gemini API key (`gemini-3.5-flash-lite`).
+- **Core Multimodal & Live Streaming Vision (All Regions)**:
+  - `GEMINI_API_KEY` — Google Gemini API key (powers both **`gemini-3.8-live`** bidirectional WebSocket streaming and **`gemini-3.5-flash-lite`** fallback).
 - **Map & Transit Routing**:
   - **Global (Upcoming Default)**: `GOOGLE_MAPS_API_KEY` — Google Maps Platform (Places, Routes & Transit) is planned as the default worldwide wayfinding provider across international Locale Packs.
   - **South Korea (`locale-ko-kr`)**: Because Google Maps pedestrian/transit turn-by-turn coverage is restricted in South Korea, `locale-ko-kr` currently uses `TMAP_API_KEY` alongside `SEOUL_SUBWAY_API_KEY` and `SEOUL_BUS_API_KEY`.
@@ -161,11 +165,14 @@ security add-generic-password -U -a sota -s SOTA_GEMINI_API_KEY -w "YOUR_GEMINI_
 ### 3. Run Tests, QA Suite & Companion Server
 
 ```bash
-# Run the 17 core & integration tests
+# Run the 18 core, harness & live-session integration tests
 npm test
 
-# Run all 41 Use-Case & Field Regression QA gates
+# Run all 51 Use-Case, Harness & Field Regression QA gates
 npm run qa
+
+# Run the Open-Dataset Benchmark Suite (VizWiz · SANPO · WalkVLM · EgoBlind · VISTA)
+npm run qa:datasets -- --batch-size=50 --offset=0 --concurrency=4
 
 # Run the 23-scenario daily life simulation
 npm run simulate
@@ -196,17 +203,17 @@ npm run android:emulator
 
 Use the top switcher (`👓 Glass Mode` | `🧪 UC QA & Logs`) to toggle between eyes-free wearable simulation and scenario inspection:
 
-1. **`👓 Glass Mode` (Default — Eyes-Free Android XR Simulator)**
+1. **`👓 Glass Mode` (Default — Eyes-Free Live Companion & Android XR Simulator)**
+   - **Real-Time `Live Stream: ON` & Focus Mode Bar (`⚡ Auto` | `👀 See` | `🤚 Act` | `🧠 Mem` | `🧭 Nav`)**:
+     - Opens a stateful **Gemini Live (`BidiGenerateContent`)** bidirectional audio/video session with speaker-echo suppression, `1280px` high-res precision snapshots, **Silent Active Watch** (*"let me know when ssamjang appears"* — stays 100% silent until the target enters the frame), persistent object/person memory, and GPS-driven wayfinding.
+     - Hardware volume keys remain dedicated to adjusting media/speech volume normally without hijacking audio playback.
    - **`TEMPLE TOUCHPAD` Gestures** (tap anywhere on the large center pad without looking):
-     - **Single Tap**: Mutes ongoing speech immediately; confirms route departure when a route plan is pending; or repeats the last spoken guidance during silence.
-     - **Touch & Hold**: Opens the voice microphone (**Invoke AI**) to ask a question, request full-text reading, save an object's location, or set a destination.
-     - **Double Tap**: Captures and analyzes **1 instant camera frame** silently.
-     - **Swipe Left / Right**: Cycles through searched destination candidates or toggles continuous `Live AI` mode `ON / OFF`.
-   - **Hardware Volume Buttons (= Glasses Physical Buttons)**:
-     - **Volume UP (1x press)**: Interrupts speech and opens Push-to-Talk voice input.
-     - **Volume DOWN (1x press)**: Instant 1-frame camera scan (`2x double-press` toggles continuous `Live AI ON / OFF`, mirroring Android XR's `TOGGLE_APP_CAMERA`).
+     - **Single Tap**: Immediately mutes/interrupts ongoing speech (**Barge-in**); confirms route departure when a route plan is pending; or repeats the last spoken guidance during silence.
+     - **Touch & Hold**: Opens Push-to-Talk voice input when `Live Stream` is `OFF` (when `Live Stream` is `ON`, you can simply speak hands-free anytime).
+     - **Double Tap**: Captures and sends an instant **`1280x960` High-Res Camera Snapshot** for fine-print reading.
+     - **Swipe Left / Right**: Cycles through searched destination candidates or toggles `Live Stream ON / OFF`.
    - **Hands-Free Voice Feedback**:
-     - Tap **`👍 Good`** or **`👎 Bad (🎙️ Voice Note)`** right below the touchpad to record spoken field feedback directly onto the latest inference log without typing.
+     - Tap **`👍 Good`** or **`👎 Bad (🎙️ Voice Note)`** right below the touchpad to attach spoken field feedback directly onto the latest inference log without typing.
 2. **`🧪 UC QA & Logs` (Scenario Lab & Log Inspector)**
    - Browse **6 daily categories** and **23 one-tap scenario chips**, send silent text commands, inspect frame thumbnails & latency (`ms`), and pull device logs to your computer with `npm run feedback:pull`.
 
@@ -236,7 +243,7 @@ npm run pre-pr
 
 ## Built With AI
 
-- **Google Gemini 4 & Cognition Devin** — Powered end-to-end across domain research, system architecture, codebase implementation, and QA simulation with human-in-the-loop field-feedback iterations. 
+- **Google Gemini 4 & Cognition Devin** — Powered end-to-end across domain research, system architecture, codebase implementation, and QA simulation with human-in-the-loop field-feedback iterations.
 
 ---
 
