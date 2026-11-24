@@ -15,5 +15,7 @@ build/
 packages/core/linear-backlog.ts
 apps/android-glass-poc/triage-feedback.ts
 feedback-logs/
+benchmarks/datasets/
+benchmarks/reports/
 ONE_PAGER.md
 PRD.md

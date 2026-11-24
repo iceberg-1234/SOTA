@@ -8,6 +8,7 @@
     "start": "node --experimental-strip-types apps/companion-web/server.ts",
     "simulate": "node --experimental-strip-types apps/scenario-simulator/run-day.ts",
     "qa": "node --experimental-strip-types apps/scenario-simulator/qa-suite.ts",
+    "qa:datasets": "node --experimental-strip-types apps/scenario-simulator/dataset-benchmark.ts",
     "pre-pr": "node --experimental-strip-types -e 'import { execSync } from \"node:child_process\"; const files = execSync(\"git ls-files\", { encoding: \"utf8\" }).split(\"\\n\"); const banned = [\"ONE_PAGER.md\", \"PRD.md\", \"linear-backlog.ts\", \"triage-feedback.ts\", \"mcp_config.json\", \"feedback-triage\", \"feedback-logs/\"]; const leaked = files.filter(f => banned.some(b => f.includes(b))); if (leaked.length) { console.error(\"❌ Blocked internal files tracked in git:\", leaked); process.exit(1); } console.log(\"✅ Git hygiene check passed (0 internal/Linear/secret files tracked).\");' && npm run qa && npm test",
     "android:build": "JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\" ANDROID_HOME=\"$HOME/Library/Android/sdk\" \"$HOME/.gradle/wrapper/dists/gradle-8.7-bin/bhs2wmbdwecv87pi65oeuq5iu/gradle-8.7/bin/gradle\" -p apps/android-glass-poc assembleDebug",
     "android:install": "node --experimental-strip-types apps/android-glass-poc/install-device.ts",

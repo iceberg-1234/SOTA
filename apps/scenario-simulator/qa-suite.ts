@@ -3,6 +3,12 @@ import {
   StatefulSkillHarness,
   toNaturalSpokenKorean,
 } from "../../packages/core/agent-harness.ts";
+import {
+  evaluateVisualInspectionPolicy,
+  GeminiLiveCompanionSession,
+  PersistentEntityMemoryStore,
+  StatefulActionGuideFsm,
+} from "../../packages/core/live-companion-harness.ts";
 import { createKoreanSkillPlugins } from "../../packages/locale-ko-kr/skills.ts";
 import { VisualPedestrianNavigator } from "../../packages/locale-ko-kr/pedestrian-nav.ts";
 import {
@@ -330,7 +336,7 @@ export async function runFullQaVerificationSuite(): Promise<{
   });
   const reg08Check = evaluateSpeechQualityGates(
     `${occludedSpeech} ${manufacturedSpeech}`,
-    /손가락이 글자 부분을 가리고 있어요.*제조일자가 2026-11-01로 적혀 있어요.*소비기한은 용기 옆면이나/,
+    /손가락이 글자 부분을 가리고 있어요.*제조일자가 2026-11-01로 적혀 있어요.*소비기한은.*따로 적혀 있으니/,
   );
   results.push({
     id: "QA-REG-08",
@@ -505,6 +511,254 @@ export async function runFullQaVerificationSuite(): Promise<{
       !fakeLeapDateBlocked.includes("2월 29일")
         ? []
         : ["FAKE_DATE_NOT_BLOCKED"],
+  });
+
+  // QA-REG-16: SOT-156, 157, 159~164 (Valid date in draftSpeech NEVER erased into '제품 제품이지만', 정수기 -> APPLIANCE_SAFETY, 자판기 -> KIOSK_COACH)
+  const validDraftDateKept = await smartReaderSkill.executePostProcess!({
+    mode: "SMART_READER",
+    extractedSlots: {},
+    draftSpokenKorean:
+      "해찬들 태양초 고추장 소비기한은 2027년 12월 22일까지예요.",
+  });
+  const dispenserParsed = parseStructuredHarnessOutput(
+    "[SMART_READER] 정수기 물받이 쪽이 보이네요. 온수 버튼을 주의하시고 냉수 버튼을 누르세요.",
+  );
+  const vendingParsed = parseStructuredHarnessOutput(
+    "[WALKING_SAFETY] 자판기 두 번째 칸에 생수가 진열되어 있어요. 오른쪽 카드 단말기에 태그 후 아래 버튼을 누르세요.",
+  );
+  results.push({
+    id: "QA-REG-16",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 SOT-156~164] 정상 소비기한('2027년 12월 22일') 덮어쓰기 버그 제거, 정수기(APPLIANCE_SAFETY)·자판기(KIOSK_COACH) 정확 라우팅",
+    spokenOutput: `날짜유지="${validDraftDateKept}" | 정수기=${dispenserParsed.mode} | 자판기=${vendingParsed.mode}`,
+    passed:
+      validDraftDateKept.includes("2027년 12월 22일") &&
+      !validDraftDateKept.includes("제품 제품이지만") &&
+      dispenserParsed.mode === "APPLIANCE_SAFETY" &&
+      vendingParsed.mode === "KIOSK_COACH",
+    failedGates:
+      validDraftDateKept.includes("2027년 12월 22일") &&
+      dispenserParsed.mode === "APPLIANCE_SAFETY" &&
+      vendingParsed.mode === "KIOSK_COACH"
+        ? []
+        : ["SOT_156_164_REGRESSION"],
+  });
+
+  // QA-REG-17: SOT-165~174 (Roadway curb safety rule + Vending machine purchase steps instead of '꺼내 드릴까요?' + Dual-date manufacturing vs expiry playbook)
+  const walkingPrompt = harness.assembleDynamicPrompt();
+  const kioskSkill = harness
+    .getRegisteredSkills()
+    .find((s) => s.id === "KIOSK_COACH")!;
+  results.push({
+    id: "QA-REG-17",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 SOT-165~174] 차도(가로수/연석) 방향 회피 금지·'4~5걸음' 쪼개기 금지 및 자판기 카드결제/선택버튼 구매 가이드 검증",
+    spokenOutput: `보행안전 차도금지=${walkingPrompt.includes("차도 쪽 회피 절대 금지")} | 자판기 구매코칭=${kioskSkill.expertPlaybook?.realLifeValueFormula.includes("Card reader tap")}`,
+    passed:
+      walkingPrompt.includes("차도 쪽 회피 절대 금지") &&
+      (kioskSkill.expertPlaybook?.realLifeValueFormula.includes(
+        "Card reader tap",
+      ) ??
+        false),
+    failedGates: walkingPrompt.includes("차도 쪽 회피 절대 금지")
+      ? []
+      : ["MISSING_ROADWAY_GUARD"],
+  });
+
+  // QA-REG-18: Universal Structural Generalization (Unseen arbitrary items like '마요네즈 튜브' / '선크림 용기' route to SMART_READER with ZERO item-noun hardcoding!)
+  const unseenTubeParsed = parseStructuredHarnessOutput(
+    "[WALKING_SAFETY] 마요네즈 튜브 뒷면에 작은 글씨가 인쇄되어 있어요.",
+  );
+  const unseenLotionParsed = parseStructuredHarnessOutput(
+    "[WALKING_SAFETY] 선크림 용기 바닥면에 사용기한이 적혀 있어요.",
+  );
+  results.push({
+    id: "QA-REG-18",
+    category: "FIELD_REGRESSION",
+    title: "[회귀검증 범용구조] 미등록 임의 사물('마요네즈 튜브', '선크림 용기')도 품목 하드코딩 없이 구조 패턴으로 SMART_READER 100% 분류",
+    spokenOutput: `마요네즈튜브=${unseenTubeParsed.mode} | 선크림용기=${unseenLotionParsed.mode}`,
+    passed:
+      unseenTubeParsed.mode === "SMART_READER" &&
+      unseenLotionParsed.mode === "SMART_READER",
+    failedGates:
+      unseenTubeParsed.mode === "SMART_READER" &&
+      unseenLotionParsed.mode === "SMART_READER"
+        ? []
+        : ["UNSEEN_CONTAINER_MISCLASSIFIED"],
+  });
+
+  // QA-REG-19 & QA-REG-20: Comprehensive 16-Skill Layer-2 Optimization (Crosswalk <10s blinking P0 wait override + Expired-food P0 alert even on body-only dates!)
+  const crosswalkSkill = harness
+    .getRegisteredSkills()
+    .find((s) => s.id === "CROSSWALK_SIGNAL")!;
+  const shortGreenWaitSpeech = await crosswalkSkill.executePostProcess!({
+    mode: "CROSSWALK_SIGNAL",
+    extractedSlots: { signal: "GREEN", remainSec: "6" },
+    draftSpokenKorean: "초록불입니다. 잔여 6초, 빨리 건너세요.",
+  });
+  const expiredBodyDateSpeech = await smartReaderSkill.executePostProcess!({
+    mode: "SMART_READER",
+    extractedSlots: {},
+    draftSpokenKorean: "손에 드신 우유 소비기한은 2025년 5월 10일까지예요.",
+  });
+  results.push({
+    id: "QA-REG-19",
+    category: "FIELD_REGRESSION",
+    title: "[스킬최적화 횡단보도] 초록불 잔여 시간 부족(6초) 또는 점멸 시 무리한 진입 차단 및 다음 신호 대기(P0) 강제",
+    spokenOutput: shortGreenWaitSpeech,
+    passed:
+      shortGreenWaitSpeech.includes("기다리세요") &&
+      shortGreenWaitSpeech.includes("다음 초록불"),
+    failedGates: shortGreenWaitSpeech.includes("기다리세요")
+      ? []
+      : ["SHORT_GREEN_NOT_BLOCKED"],
+  });
+  results.push({
+    id: "QA-REG-20",
+    category: "FIELD_REGRESSION",
+    title: "[스킬최적화 식품안전] 슬롯 누락 본문 날짜('2025년 5월 10일')에서도 소비기한 경과 자동 계산 및 섭취 금지 경고",
+    spokenOutput: expiredBodyDateSpeech,
+    passed:
+      expiredBodyDateSpeech.includes("지났") &&
+      (expiredBodyDateSpeech.includes("폐기") ||
+        expiredBodyDateSpeech.includes("마세요")),
+    failedGates: expiredBodyDateSpeech.includes("지났")
+      ? []
+      : ["EXPIRED_BODY_DATE_MISSED"],
+  });
+
+  // QA-REG-21 ~ 23: 4-Layer Model-Agnostic Live Companion Harness (See & Read · Act & Guide FSM · Persistent Object/Person Memory)
+  const dualDateVerified = evaluateVisualInspectionPolicy(
+    {
+      targetItem: "고추장 용기",
+      exactKeyNumbers: ["4135"],
+      observedDates: [
+        { rawText: "2026.06.23 11:25", hasTimestamp: true },
+        { rawText: "2027.12.22", hasTimestamp: false },
+      ],
+      framingIssue: "NONE",
+    },
+    "2026-11-24",
+  );
+  const receiptOrderVerified = evaluateVisualInspectionPolicy({
+    targetItem: "카페 영수증",
+    exactKeyNumbers: ["4135"],
+    observedDates: [],
+    framingIssue: "NONE",
+  });
+  results.push({
+    id: "QA-REG-21",
+    category: "FIELD_REGRESSION",
+    title: "[Model-Agnostic Harness: 바라보기] 스키마 기반 복수 날짜('2026.06.23 11:25' vs '2027.12.22') 분리 및 4자리 주문번호('4135') 검증",
+    spokenOutput: `${dualDateVerified.spokenGuidanceKo} | ${receiptOrderVerified.spokenGuidanceKo}`,
+    passed:
+      dualDateVerified.resolvedExpiryIso === "2027-12-22" &&
+      receiptOrderVerified.spokenGuidanceKo.includes("4135"),
+    failedGates:
+      dualDateVerified.resolvedExpiryIso === "2027-12-22"
+        ? []
+        : ["DUAL_DATE_POLICY_FAILED"],
+  });
+
+  const actFsm = new StatefulActionGuideFsm();
+  const actStep1 = actFsm.step({
+    surfaceType: "KIOSK_SCREEN",
+    targetLabel: "아이스 초코라떼",
+    handVisible: false,
+  });
+  const actStep2 = actFsm.step({
+    surfaceType: "KIOSK_SCREEN",
+    targetLabel: "아이스 초코라떼",
+    handVisible: true,
+    dxCm: 4.1,
+    dyCm: -2.2,
+  });
+  const actStep3 = actFsm.step({
+    surfaceType: "KIOSK_SCREEN",
+    targetLabel: "아이스 초코라떼",
+    handVisible: true,
+    dxCm: 0.3,
+    dyCm: 0.2,
+  });
+  results.push({
+    id: "QA-REG-22",
+    category: "FIELD_REGRESSION",
+    title: "[Model-Agnostic Harness: 행동하기] 4단계 상태 기계(베젤 기준점 -> 실시간 cm 이동 -> 정조준 클릭 확정) 강제 검증",
+    spokenOutput: `${actStep1.stage} -> ${actStep2.stage} -> ${actStep3.stage} ("${actStep3.spokenGuidanceKo}")`,
+    passed:
+      actStep1.stage === "STAGE_2_SAFE_BEZEL_ANCHOR" &&
+      actStep2.stage === "STAGE_3_LIVE_CM_TRACKING" &&
+      actStep3.stage === "STAGE_4_PRESS_AND_VERIFY",
+    failedGates:
+      actStep3.stage === "STAGE_4_PRESS_AND_VERIFY"
+        ? []
+        : ["ACT_FSM_FAILED"],
+  });
+
+  const memStore = new PersistentEntityMemoryStore();
+  memStore.upsert({
+    category: "PERSON",
+    name: "박서연 팀장",
+    landmarkOrAppearance: "은테 안경과 베이지색 트렌치코트 착용",
+    extraNotes: "디자인팀",
+  });
+  memStore.upsert({
+    category: "OBJECT",
+    name: "아침 혈압약 통",
+    landmarkOrAppearance: "식탁 왼쪽 정수기 옆 바구니 안",
+  });
+  const recalledPerson = memStore.recall("박서연", "PERSON");
+  const recalledObj = memStore.recall("혈압약", "OBJECT");
+  results.push({
+    id: "QA-REG-23",
+    category: "FIELD_REGRESSION",
+    title: "[Model-Agnostic Harness: 기억하기] 사물(OBJECT)·사람(PERSON)·공간(SPACE) 영구 엔티티 메모리 저장 및 회상 검증",
+    spokenOutput: `인물="${recalledPerson[0]?.landmarkOrAppearance}" | 사물="${recalledObj[0]?.landmarkOrAppearance}"`,
+    passed: recalledPerson.length === 1 && recalledObj.length === 1,
+    failedGates:
+      recalledPerson.length === 1 && recalledObj.length === 1
+        ? []
+        : ["MEMORY_STORE_FAILED"],
+  });
+
+  // QA-REG-24 & 25: Active Target Watch ('쌈장 찾으러 가자' -> silent until found) & Live Navigation Tool Integration ('왕십리역 가자')
+  const watchSession = new GeminiLiveCompanionSession();
+  const watchStart = watchSession.handleToolCallLocally(
+    "start_watching_target",
+    { targetDescription: "쌈장" },
+  );
+  const navSearch = watchSession.handleToolCallLocally("search_destination", {
+    placeQuery: "왕십리역",
+    transportMode: "SUBWAY",
+  });
+  const navStart = watchSession.handleToolCallLocally("confirm_route_start", {});
+  results.push({
+    id: "QA-REG-24",
+    category: "FIELD_REGRESSION",
+    title: "[Live Active Watch] '쌈장 찾으러 가자' -> start_watching_target 무음 감시 모드 진입 및 발견 시에만 발화 검증",
+    spokenOutput: watchStart.verifiedSpeechKo,
+    passed:
+      watchSession.getActiveWatchTarget() === "쌈장" &&
+      watchStart.verifiedSpeechKo.includes("조용히") &&
+      watchStart.verifiedSpeechKo.includes("쌈장"),
+    failedGates:
+      watchSession.getActiveWatchTarget() === "쌈장"
+        ? []
+        : ["WATCH_TARGET_NOT_SET"],
+  });
+  results.push({
+    id: "QA-REG-25",
+    category: "FIELD_REGRESSION",
+    title: "[Live Wayfinding] Live 세션 내 목적지 검색(search_destination) -> 출발 확정(confirm_route_start) -> GPS+무음코파일럿 분리 검증",
+    spokenOutput: `${navSearch.verifiedSpeechKo} | ${navStart.verifiedSpeechKo}`,
+    passed:
+      watchSession.getActiveNavDestination() === "왕십리역" &&
+      navStart.verifiedSpeechKo.includes("GPS") &&
+      navStart.verifiedSpeechKo.includes("장애물"),
+    failedGates:
+      watchSession.getActiveNavDestination() === "왕십리역"
+        ? []
+        : ["LIVE_NAV_TOOL_FAILED"],
   });
 
   const emartSearch = await nav.searchDestinationCandidates({

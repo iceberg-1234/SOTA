@@ -292,45 +292,70 @@ export class GeminiVisionAgent {
     }
 
     const payload = this.buildPayload(req);
-    const endpoints = this.getCandidateEndpoints(key);
+    const fallbackModels = [
+      this.model,
+      "gemini-3.1-flash-lite",
+      "gemini-3.8-flash",
+    ];
     let lastDiagnostic = "";
 
-    for (const candidate of endpoints) {
-      try {
-        const res = await fetch(candidate.url, {
-          method: "POST",
-          headers: candidate.headers,
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(8000),
-        });
+    for (const candidateModel of fallbackModels) {
+      const modelPayload =
+        candidateModel === "gemini-3.8-flash"
+          ? {
+              ...payload,
+              generationConfig: {
+                temperature: 0.15,
+                maxOutputTokens: req.maxOutputTokens ?? 160,
+              },
+            }
+          : payload;
+      const endpoints = this.getCandidateEndpoints(key).map((ep) => ({
+        ...ep,
+        url: ep.url.replace(this.model, candidateModel),
+      }));
 
-        const data = (await res.json().catch(() => ({}))) as Record<
-          string,
-          any
-        >;
+      for (const candidate of endpoints) {
+        try {
+          const res = await fetch(candidate.url, {
+            method: "POST",
+            headers: candidate.headers,
+            body: JSON.stringify(modelPayload),
+            signal: AbortSignal.timeout(8000),
+          });
 
-        if (res.ok) {
-          const text =
-            data?.candidates?.[0]?.content?.parts
-              ?.map((p: { text?: string }) => p.text ?? "")
-              .join(" ")
-              .trim() ?? "";
-          if (text) {
-            return {
-              ok: true,
-              source: candidate.source,
-              model: this.model,
-              spokenKorean: text,
-              latencyMs: Date.now() - start,
-            };
+          const data = (await res.json().catch(() => ({}))) as Record<
+            string,
+            any
+          >;
+
+          if (res.ok) {
+            const text =
+              data?.candidates?.[0]?.content?.parts
+                ?.map((p: { text?: string }) => p.text ?? "")
+                .join(" ")
+                .trim() ?? "";
+            if (text) {
+              return {
+                ok: true,
+                source: candidate.source,
+                model: candidateModel,
+                spokenKorean: text,
+                latencyMs: Date.now() - start,
+              };
+            }
           }
-        }
 
-        const errMsg =
-          data?.error?.message ?? `HTTP ${res.status} ${res.statusText}`;
-        lastDiagnostic = `[${candidate.source}] ${errMsg}`;
-      } catch (err) {
-        lastDiagnostic = `[${candidate.source}] ${err instanceof Error ? err.message : String(err)}`;
+          const errMsg =
+            data?.error?.message ?? `HTTP ${res.status} ${res.statusText}`;
+          lastDiagnostic = `[${candidateModel}] ${errMsg}`;
+          if (res.status === 429 || res.status === 503) {
+            await new Promise((r) => setTimeout(r, 800));
+            break; // Fail over immediately to next Flash model!
+          }
+        } catch (err) {
+          lastDiagnostic = `[${candidateModel}] ${err instanceof Error ? err.message : String(err)}`;
+        }
       }
     }
 

@@ -44,6 +44,12 @@ data class NavTurnStep(
     val instructionKo: String
 )
 
+data class DynamicStationStop(
+    val name: String,
+    val lat: Double,
+    val lng: Double
+)
+
 data class ActivePedestrianRoute(
     val routeSource: String,
     val originAddressKo: String,
@@ -56,11 +62,14 @@ data class ActivePedestrianRoute(
     val turnSteps: List<NavTurnStep>,
     val transitSummaryKo: String = "",
     val subwayRouteStations: List<String> = emptyList(),
+    val dynamicTransitStops: List<DynamicStationStop> = emptyList(),
+    val firstBoardingPoint: DynamicStationStop? = null,
     val destinationDoorSideKo: String = "오른쪽",
     val targetExitTextKo: String = "출구",
     val macroPlanOverviewKo: String = "",
     val macroMilestones: List<String> = emptyList(),
     var isConfirmedByUser: Boolean = false,
+    var hasBoardedSubway: Boolean = false,
     var currentStepIndex: Int = 0
 )
 
@@ -99,8 +108,197 @@ object WayfindingNavigator {
     var lastSearchResult: SearchCandidatesResult? = null
         private set
 
-    fun clearRoute() {
+    private var lastAnnouncedStepIdx: Int = -1
+    private var lastPreTurnAnnouncedStepIdx: Int = -1
+    private var lastAnnouncedSubwayIdx: Int = -1
+    private const val ROUTE_PERSIST_FILE = "sota_active_route.json"
+
+    fun clearRoute(context: android.content.Context? = null) {
         activeRoute = null
+        lastAnnouncedStepIdx = -1
+        lastPreTurnAnnouncedStepIdx = -1
+        lastAnnouncedSubwayIdx = -1
+        if (context != null) {
+            try { java.io.File(context.filesDir, ROUTE_PERSIST_FILE).delete() } catch (_: Exception) {}
+        }
+    }
+
+    fun persistActiveRoute(context: android.content.Context) {
+        val rt = activeRoute ?: return
+        try {
+            val stnsArr = JSONArray()
+            rt.subwayRouteStations.forEach { stnsArr.put(it) }
+            val stepsArr = JSONArray()
+            rt.turnSteps.forEach { s ->
+                stepsArr.put(
+                    JSONObject()
+                        .put("stepIndex", s.stepIndex)
+                        .put("roadName", s.roadName)
+                        .put("distanceMeters", s.distanceMeters)
+                        .put("stepsCount", s.stepsCount)
+                        .put("turnDirectionKo", s.turnDirectionKo)
+                        .put("targetLat", s.targetLat)
+                        .put("targetLng", s.targetLng)
+                        .put("instructionKo", s.instructionKo)
+                )
+            }
+            val obj = JSONObject()
+                .put("routeSource", rt.routeSource)
+                .put("originAddressKo", rt.originAddressKo)
+                .put("originLat", rt.originLat)
+                .put("originLng", rt.originLng)
+                .put("destName", rt.destination.name)
+                .put("destShortAddr", rt.destination.shortAddressKo)
+                .put("destLat", rt.destination.lat)
+                .put("destLng", rt.destination.lng)
+                .put("destDistM", rt.destination.distanceMeters)
+                .put("totalDistanceMeters", rt.totalDistanceMeters)
+                .put("totalStepsCount", rt.totalStepsCount)
+                .put("estimatedMinutes", rt.estimatedMinutes)
+                .put("transitSummaryKo", rt.transitSummaryKo)
+                .put("destinationDoorSideKo", rt.destinationDoorSideKo)
+                .put("targetExitTextKo", rt.targetExitTextKo)
+                .put("macroPlanOverviewKo", rt.macroPlanOverviewKo)
+                .put("isConfirmedByUser", rt.isConfirmedByUser)
+                .put("hasBoardedSubway", rt.hasBoardedSubway)
+                .put("currentStepIndex", rt.currentStepIndex)
+                .put("subwayRouteStations", stnsArr)
+                .put("turnSteps", stepsArr)
+            java.io.File(context.filesDir, ROUTE_PERSIST_FILE).writeText(obj.toString(), Charsets.UTF_8)
+        } catch (_: Exception) {}
+    }
+
+    fun restorePersistedRouteIfAny(context: android.content.Context) {
+        if (activeRoute != null) return
+        try {
+            val f = java.io.File(context.filesDir, ROUTE_PERSIST_FILE)
+            if (!f.exists()) return
+            val o = JSONObject(f.readText(Charsets.UTF_8))
+            val stns = mutableListOf<String>()
+            val stnsArr = o.optJSONArray("subwayRouteStations") ?: JSONArray()
+            for (i in 0 until stnsArr.length()) stns.add(stnsArr.optString(i))
+            val steps = mutableListOf<NavTurnStep>()
+            val stepsArr = o.optJSONArray("turnSteps") ?: JSONArray()
+            for (i in 0 until stepsArr.length()) {
+                val s = stepsArr.optJSONObject(i) ?: continue
+                steps.add(
+                    NavTurnStep(
+                        stepIndex = s.optInt("stepIndex", i + 1),
+                        roadName = s.optString("roadName", "보행로"),
+                        distanceMeters = s.optInt("distanceMeters", 25),
+                        stepsCount = s.optInt("stepsCount", 35),
+                        turnDirectionKo = s.optString("turnDirectionKo", "직진"),
+                        targetLat = s.optDouble("targetLat", currentLat),
+                        targetLng = s.optDouble("targetLng", currentLng),
+                        instructionKo = s.optString("instructionKo", "")
+                    )
+                )
+            }
+            if (steps.isEmpty()) return
+            val restored = ActivePedestrianRoute(
+                routeSource = o.optString("routeSource", "TMAP_PEDESTRIAN"),
+                originAddressKo = o.optString("originAddressKo", "출발지"),
+                originLat = o.optDouble("originLat", currentLat),
+                originLng = o.optDouble("originLng", currentLng),
+                destination = PoiCandidate(
+                    index = 1,
+                    name = o.optString("destName", "목적지"),
+                    categoryLabelKo = "목적지",
+                    areaRoadPrefixKo = o.optString("destShortAddr", ""),
+                    spokenPlaceWithAddrKo = o.optString("destShortAddr", o.optString("destName", "목적지")),
+                    shortAddressKo = o.optString("destShortAddr", ""),
+                    lat = o.optDouble("destLat", currentLat),
+                    lng = o.optDouble("destLng", currentLng),
+                    distanceMeters = o.optInt("destDistM", 0),
+                    walkMinutes = o.optInt("estimatedMinutes", 10),
+                    transitMinutes = o.optInt("estimatedMinutes", 10),
+                    bearingDeg = 0,
+                    cardinalKo = "앞쪽",
+                    recommendationScore = 100
+                ),
+                totalDistanceMeters = o.optInt("totalDistanceMeters", 0),
+                totalStepsCount = o.optInt("totalStepsCount", 0),
+                estimatedMinutes = o.optInt("estimatedMinutes", 10),
+                turnSteps = steps,
+                transitSummaryKo = o.optString("transitSummaryKo", ""),
+                subwayRouteStations = stns,
+                destinationDoorSideKo = o.optString("destinationDoorSideKo", "오른쪽"),
+                targetExitTextKo = o.optString("targetExitTextKo", "출구"),
+                macroPlanOverviewKo = o.optString("macroPlanOverviewKo", ""),
+                isConfirmedByUser = o.optBoolean("isConfirmedByUser", false),
+                hasBoardedSubway = o.optBoolean("hasBoardedSubway", false),
+                currentStepIndex = o.optInt("currentStepIndex", 0)
+            )
+            activeRoute = restored
+            if (restored.isConfirmedByUser) {
+                NativeSotaAiClient.startOrClearMission("${restored.destination.shortAddressKo} (${restored.macroPlanOverviewKo})")
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Map-Driven Deterministic Event Announcer (Fixes SOT-175, SOT-176, SOT-180):
+     * Speaks ONLY when entering a new turn step, crossing the 25m pre-turn alert, or passing a new subway station!
+     */
+    fun pollDeterministicGpsMilestoneSpeech(context: android.content.Context): String? {
+        val route = activeRoute ?: return null
+        if (!route.isConfirmedByUser || !hasGpsFix) return null
+
+        // 1. Subway Station Change Event (speaks ONCE per new station!)
+        val stns = route.subwayRouteStations
+        if (stns.size >= 2) {
+            var closestIdx = 0
+            var bestDist = Int.MAX_VALUE
+            for (i in stns.indices) {
+                val coord = resolveStationLatLng(route, stns[i]) ?: continue
+                val d = haversineMeters(currentLat, currentLng, coord.first, coord.second)
+                if (d < bestDist) {
+                    bestDist = d
+                    closestIdx = i
+                }
+            }
+            if (closestIdx >= 1 && bestDist <= 380 && closestIdx != lastAnnouncedSubwayIdx) {
+                route.hasBoardedSubway = true
+                lastAnnouncedSubwayIdx = closestIdx
+                persistActiveRoute(context)
+                val cur = stns[closestIdx]
+                val dest = stns.last()
+                val rem = max(0, stns.size - 1 - closestIdx)
+                return when {
+                    rem == 0 -> "목적지 ${dest}역에 도착했어요! ${route.destinationDoorSideKo} 문이 완전히 열리면 내리셔서 ${route.targetExitTextKo} 방향으로 이동하세요."
+                    rem == 1 -> "이번 역은 ${cur}역이에요. 바로 다음 역이 내리실 ${dest}역이니 ${route.destinationDoorSideKo} 출입문 앞에서 내릴 준비를 해주세요."
+                    else -> "이번 역은 ${cur}역이에요. 내리실 ${dest}역까지 ${rem}정거장 남았고, 내리실 문은 ${route.destinationDoorSideKo}이에요."
+                }
+            }
+        }
+
+        if (route.hasBoardedSubway) return null
+
+        // 2. Outdoor Pedestrian Turn-by-Turn Milestone Event
+        var advanced = false
+        while (route.currentStepIndex < route.turnSteps.size - 1) {
+            val st = route.turnSteps[route.currentStepIndex]
+            val d = haversineMeters(currentLat, currentLng, st.targetLat, st.targetLng)
+            if (d <= 15) {
+                route.currentStepIndex += 1
+                advanced = true
+            } else {
+                break
+            }
+        }
+        val curStep = route.turnSteps[route.currentStepIndex]
+        val distToTurn = haversineMeters(currentLat, currentLng, curStep.targetLat, curStep.targetLng)
+
+        if (advanced && route.currentStepIndex != lastAnnouncedStepIdx) {
+            lastAnnouncedStepIdx = route.currentStepIndex
+            persistActiveRoute(context)
+            return "다음 안내 구간이에요. ${curStep.instructionKo.replace(Regex("\\([^)]*\\)"), "").trim()} 하세요."
+        }
+        if (distToTurn in 16..28 && route.currentStepIndex != lastPreTurnAnnouncedStepIdx && curStep.turnDirectionKo != "직진") {
+            lastPreTurnAnnouncedStepIdx = route.currentStepIndex
+            return "잠시 후 약 ${distToTurn}미터 앞에서 ${curStep.turnDirectionKo} 구간이에요."
+        }
+        return null
     }
 
     fun haversineMeters(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Int {
@@ -172,7 +370,7 @@ object WayfindingNavigator {
         "신분당선" to listOf("신사", "논현", "신논현", "강남", "양재", "양재시민의숲", "판교")
     )
 
-    private fun normalizeStationCore(raw: String): String {
+    fun normalizeStationCore(raw: String): String {
         return raw.replace(Regex("\\[[^\\]]*]"), "")
             .replace(Regex("\\([^)]*\\)"), "")
             .replace(Regex("(?:수도권|서울)?(?:\\d+호선|수인분당선|신분당선|경의중앙선|공항철도|경춘선|우이신설선|신림선|김포골드라인|서해선)"), "")
@@ -276,7 +474,9 @@ object WayfindingNavigator {
         return computeSeoulSubwayRoutePlan(startStnRaw, endStnRaw)?.summaryKo
     }
 
-    fun findNearestSubwayStation(lat: Double, lng: Double): Pair<String, Int>? {
+    data class NearestStationResult(val name: String, val distMeters: Int, val lat: Double, val lng: Double)
+
+    fun findNearestSubwayStation(lat: Double, lng: Double): NearestStationResult? {
         val tmapKey = BuildConfig.TMAP_API_KEY
         if (tmapKey.isBlank()) return null
         return try {
@@ -300,7 +500,7 @@ object WayfindingNavigator {
                     val sLon = p.optString("noorLon", p.optString("frontLon")).toDoubleOrNull() ?: continue
                     val dist = haversineMeters(lat, lng, sLat, sLon)
                     val cleanName = rawName.replace(Regex("\\[(?:수도권)?([^\\]]+)]"), " $1").trim()
-                    return cleanName to dist
+                    return NearestStationResult(cleanName, dist, sLat, sLon)
                 }
             }
             null
@@ -606,6 +806,8 @@ object WayfindingNavigator {
         var routeSource = "TMAP_PEDESTRIAN"
         var transitSummaryKo = ""
         var subwayStationsList = emptyList<String>()
+        val dynamicStops = mutableListOf<DynamicStationStop>()
+        var firstBoardingPt: DynamicStationStop? = null
         var destDoorSideKo = "오른쪽"
         val exitMatch = Regex("(\\d+\\s*번\\s*출구)").find(candidate.name)?.groupValues?.get(1) ?: "출구"
         val tmapKey = BuildConfig.TMAP_API_KEY
@@ -679,24 +881,25 @@ object WayfindingNavigator {
             if (preferTransit && preferSubwayOnly) {
                 val originStn = findNearestSubwayStation(originLat, originLng)
                 val destStn = if (candidate.categoryLabelKo.contains("지하철") || candidate.name.contains("역")) {
-                    candidate.name to 0
+                    NearestStationResult(candidate.name, 0, candidate.lat, candidate.lng)
                 } else {
                     findNearestSubwayStation(candidate.lat, candidate.lng)
                 }
                 if (originStn != null && destStn != null) {
-                    val subPlan = computeSeoulSubwayRoutePlan(originStn.first, destStn.first)
+                    firstBoardingPt = DynamicStationStop(normalizeStationCore(originStn.name), originStn.lat, originStn.lng)
+                    val subPlan = computeSeoulSubwayRoutePlan(originStn.name, destStn.name)
                     if (subPlan != null) {
                         routeSource = "TMAP_SUBWAY_AND_WALK"
                         subwayStationsList = subPlan.allStations
                         destDoorSideKo = subPlan.destDoorSideKo
                         val legsList = mutableListOf(
-                            "현재 위치에서 ${normalizeStationCore(originStn.first)}역까지 도보 ${originStn.second}미터 이동",
+                            "현재 위치에서 ${normalizeStationCore(originStn.name)}역까지 도보 ${originStn.distMeters}미터 이동",
                             subPlan.summaryKo
                         )
-                        if (destStn.second > 30) {
-                            legsList.add("${normalizeStationCore(destStn.first)}역 하차 후 ${candidate.name}까지 도보 ${destStn.second}미터 이동")
+                        if (destStn.distMeters > 30) {
+                            legsList.add("${normalizeStationCore(destStn.name)}역 하차 후 ${candidate.name}까지 도보 ${destStn.distMeters}미터 이동")
                         } else if (exitMatch != "출구") {
-                            legsList.add("${normalizeStationCore(destStn.first)}역 하차 후 $exitMatch 방향으로 이동")
+                            legsList.add("${normalizeStationCore(destStn.name)}역 하차 후 $exitMatch 방향으로 이동")
                         }
                         transitSummaryKo = legsList.joinToString(" | ")
                     }
@@ -764,8 +967,33 @@ object WayfindingNavigator {
                                 if (mode == "WALK") {
                                     if (d > 10) legSummaries.add("${sName}에서 ${eName}까지 도보 ${d}미터 이동")
                                 } else {
+                                    val sObj = leg.optJSONObject("start")
+                                    val sLat = sObj?.optDouble("lat")
+                                    val sLon = sObj?.optDouble("lon")
+                                    if (firstBoardingPt == null && sLat != null && sLon != null && !sLat.isNaN() && !sLon.isNaN()) {
+                                        firstBoardingPt = DynamicStationStop(normalizeStationCore(sName).ifBlank { sName }, sLat, sLon)
+                                    }
+                                    // Extract dynamic passStopList from TMAP Transit API so ANY subway/bus line in Korea works with zero hardcoded station maps!
+                                    val passArr = leg.optJSONObject("passStopList")?.optJSONArray("stationList")
+                                        ?: leg.optJSONObject("passStopList")?.optJSONArray("stations")
+                                    if (passArr != null && passArr.length() >= 2) {
+                                        for (pIdx in 0 until passArr.length()) {
+                                            val stObj = passArr.optJSONObject(pIdx) ?: continue
+                                            val stName = normalizeStationCore(stObj.optString("stationName", "")).ifBlank { stObj.optString("stationName", "") }
+                                            val pLat = stObj.optString("lat").toDoubleOrNull() ?: stObj.optDouble("lat")
+                                            val pLon = stObj.optString("lon").toDoubleOrNull() ?: stObj.optDouble("lon")
+                                            if (stName.isNotBlank() && !pLat.isNaN() && !pLon.isNaN()) {
+                                                if (dynamicStops.lastOrNull()?.name != stName) {
+                                                    dynamicStops.add(DynamicStationStop(stName, pLat, pLon))
+                                                }
+                                            }
+                                        }
+                                    }
                                     legSummaries.add("${sName}에서 $rName 탑승 후 ${eName} 하차")
                                 }
+                            }
+                            if (subwayStationsList.isEmpty() && dynamicStops.size >= 2) {
+                                subwayStationsList = dynamicStops.map { it.name }
                             }
                             transitSummaryKo = legSummaries.joinToString(" | ")
                         }
@@ -826,6 +1054,8 @@ object WayfindingNavigator {
             turnSteps = steps,
             transitSummaryKo = transitSummaryKo,
             subwayRouteStations = subwayStationsList,
+            dynamicTransitStops = dynamicStops,
+            firstBoardingPoint = firstBoardingPt,
             destinationDoorSideKo = destDoorSideKo,
             targetExitTextKo = exitMatch,
             macroPlanOverviewKo = macroPlanOverviewKo,
@@ -845,6 +1075,16 @@ object WayfindingNavigator {
         return "좋아요, ${route.destination.name} 안내를 지금부터 시작할게요! 교통카드는 챙기셨죠? 우선 첫 번째 구간으로 $firstInstr 해 볼까요?"
     }
 
+    private fun resolveStationLatLng(route: ActivePedestrianRoute, stnName: String): Pair<Double, Double>? {
+        val dyn = route.dynamicTransitStops.find { it.name == stnName || normalizeStationCore(it.name) == normalizeStationCore(stnName) }
+        if (dyn != null) return dyn.lat to dyn.lng
+        if (route.firstBoardingPoint != null && normalizeStationCore(route.firstBoardingPoint.name) == normalizeStationCore(stnName)) {
+            return route.firstBoardingPoint.lat to route.firstBoardingPoint.lng
+        }
+        val fallback = SEOUL_STATION_COORDS[normalizeStationCore(stnName)]
+        return fallback?.let { it.lat to it.lng }
+    }
+
     fun computeLiveSubwayProgressForPrompt(): String {
         val route = activeRoute ?: return ""
         val stns = route.subwayRouteStations
@@ -855,8 +1095,8 @@ object WayfindingNavigator {
         var closestIdx = 0
         var bestDist = Int.MAX_VALUE
         for (i in stns.indices) {
-            val info = SEOUL_STATION_COORDS[stns[i]] ?: continue
-            val d = haversineMeters(uLat, uLng, info.lat, info.lng)
+            val coord = resolveStationLatLng(route, stns[i]) ?: continue
+            val d = haversineMeters(uLat, uLng, coord.first, coord.second)
             if (d < bestDist) {
                 bestDist = d
                 closestIdx = i
@@ -867,23 +1107,30 @@ object WayfindingNavigator {
         val remainingStops = max(0, stns.size - 1 - closestIdx)
         val doorSide = route.destinationDoorSideKo
         val exitStr = route.targetExitTextKo
+        if (closestIdx >= 1) {
+            route.hasBoardedSubway = true
+        }
+
+        // SOT-165, 166, 167: At the boarding station (`closestIdx == 0` before boarding), NEVER claim the user is already inside the train!
+        if (closestIdx == 0 && !route.hasBoardedSubway) {
+            val nextDirStations = stns.drop(1).take(3).joinToString("·")
+            return "[승차역 진입/대기 단계 — 아직 열차 탑승 전!]: 승차역은 ${stns[0]}역이며 목적지 ${destStn}역으로 가려면 반드시 '$nextDirStations 방면' 표지판·개찰구·계단·승강장으로 가야 합니다! 카메라에 보이는 표지판(예: '${stns[1]}-${stns.getOrNull(3) ?: destStn}')이 '$nextDirStations 방면'과 일치하면 '네, ${destStn}역 가시는 방향 맞아요!'라고 명확히 확인해 주세요. 실제로 객차 안에 타기 전에는 절대 열차 안이라고 말하지 마세요."
+        }
 
         return when {
             remainingStops >= 2 ->
-                "현재 GPS 기준 가장 가까운 역: ${curStn}역 (목적지 ${destStn}역까지 ${remainingStops}정거장 남음 — 아직 내릴 역이 아니므로 절대 내리라고 하지 마세요! ${destStn}역 내리실 문 방향: $doorSide)"
+                "현재 열차 탑승 중 — GPS 기준 ${curStn}역 부근 통과 중 (목적지 ${destStn}역까지 ${remainingStops}정거장 남음 — 아직 내릴 역이 아니므로 절대 내리라고 하지 마세요! ${destStn}역 내리실 문 방향: $doorSide)"
             remainingStops == 1 ->
-                "현재 GPS 기준 ${curStn}역 부근 — 바로 다음 역이 하차할 목적지 ${destStn}역(1정거장 남음)! ${destStn}역에서는 $doorSide 문이 열리니 지금부터 문 앞에서 내릴 준비를 하라고 안내하세요."
+                "현재 열차 탑승 중 — ${curStn}역 부근, 바로 다음 역이 하차할 목적지 ${destStn}역(1정거장 남음)! ${destStn}역에서는 $doorSide 문이 열리니 지금부터 문 앞에서 내릴 준비를 하라고 안내하세요."
             else ->
                 "현재 목적지 ${destStn}역 도착 구간(0정거장 남음) — 열차 ${doorSide} 문이 실제로 완전히 열리고 앞사람이 내린 뒤 하차하여 $exitStr 방향 표지판과 점자블록을 따라 나가라고 안내하세요."
         }
     }
 
     /**
-     * Layer 2 Deterministic Guard for Subway Riding (Fixes LUM-73 ~ LUM-108):
-     * Prevents premature "get off now / transfer corridor / window blocked" hallucinations when GPS shows
-     * the train is still >= 1 stop away from the destination station, and injects exact station + door side + exit info.
+     * Layer 2 Deterministic Guard for Subway Riding (Fixes LUM-73 ~ LUM-108 & SOT-166, 167):
      */
-    fun guardSubwayRideSpeech(draftSpeech: String): String {
+    fun guardSubwayRideSpeech(draftSpeech: String, detectedModeId: String = ""): String {
         val route = activeRoute ?: return draftSpeech
         val stns = route.subwayRouteStations
         if (stns.size < 2) return draftSpeech
@@ -891,13 +1138,21 @@ object WayfindingNavigator {
         var closestIdx = 0
         var bestDist = Int.MAX_VALUE
         for (i in stns.indices) {
-            val info = SEOUL_STATION_COORDS[stns[i]] ?: continue
-            val d = haversineMeters(currentLat, currentLng, info.lat, info.lng)
+            val coord = resolveStationLatLng(route, stns[i]) ?: continue
+            val d = haversineMeters(currentLat, currentLng, coord.first, coord.second)
             if (d < bestDist) {
                 bestDist = d
                 closestIdx = i
             }
         }
+        if (detectedModeId == "SUBWAY_ON_BOARD" || closestIdx >= 1) {
+            route.hasBoardedSubway = true
+        }
+        // SOT-166 & SOT-167: Never overwrite station concourse / sign guidance at the origin station before boarding!
+        if (!route.hasBoardedSubway && closestIdx == 0) {
+            return draftSpeech
+        }
+
         val curStn = stns[closestIdx]
         val destStn = stns.last()
         val remainingStops = max(0, stns.size - 1 - closestIdx)
@@ -937,19 +1192,27 @@ object WayfindingNavigator {
         val currentStep = route.turnSteps[route.currentStepIndex]
         val nextStep = route.turnSteps.getOrNull(route.currentStepIndex + 1)
         val distToDest = haversineMeters(uLat, uLng, route.destination.lat, route.destination.lng)
-        val stepsToDest = max(1, (distToDest / STEP_LENGTH_M).roundToInt())
-        val targetBrg = bearingDegrees(uLat, uLng, currentStep.targetLat, currentStep.targetLng)
 
-        val compassCoaching = if (hasCompassFix) {
-            coachHeadingAlignmentKo(currentCompassHeadingDeg, targetBrg)
+        // Dynamic Boarding Station/Stop Approach (works for ANY subway station or bus stop in Korea via TMAP live coordinates!)
+        val originStnName = route.firstBoardingPoint?.name ?: route.subwayRouteStations.firstOrNull()
+        val originStnCoord = originStnName?.let { resolveStationLatLng(route, it) }
+        val walkStageContext = if (!route.hasBoardedSubway && originStnName != null && originStnCoord != null) {
+            val distToBoardStn = haversineMeters(uLat, uLng, originStnCoord.first, originStnCoord.second)
+            val walkMinsLeft = max(1, (distToBoardStn / (0.85 * 60)).roundToInt())
+            if (distToBoardStn <= 75) {
+                "🚨 [탑승 지점 진입 구간 — ${originStnName} 반경 ${distToBoardStn}m 도착!]: 이제 지상 보도를 계속 직진하지 말고 카메라에서 ${originStnName} 출입구 표지판 기둥, 내려가는 계단, 엘리베이터, 또는 정류장 표지판을 찾아 진입하도록 안내하세요!"
+            } else {
+                "🚶 [탑승 지점 접근 도보 구간]: ${originStnName} 입구까지 약 ${distToBoardStn}m (도보 약 ${walkMinsLeft}분) 남음 — '네 걸음/다섯 걸음 더 걸어가볼까요?' 금지! 남은 거리(${distToBoardStn}m)를 말해주고 차도(가로수/연석) 반대쪽 안전한 건물·울타리 쪽 보도로 안내하세요."
+            }
         } else {
-            "목표 방위각 ${bearingToCardinalKo(targetBrg)}(${targetBrg}도)"
+            val stepDistM = haversineMeters(uLat, uLng, currentStep.targetLat, currentStep.targetLng)
+            "🚶 [현재 도보 구간 남은 거리]: 다음 지점까지 약 ${stepDistM}m (최종 목적지까지 ${distToDest}m)"
         }
 
         val subwayProgress = computeLiveSubwayProgressForPrompt()
-        val subwayNote = if (subwayProgress.isNotBlank()) " | 실시간 지하철 정거장 추적: $subwayProgress" else ""
-        val transitNote = if (route.transitSummaryKo.isNotBlank()) " | 전체 대중교통 환승계획: ${route.transitSummaryKo}" else " | 전체 이동계획: ${route.macroMilestones.joinToString(" -> ")}"
+        val subwayNote = if (subwayProgress.isNotBlank()) " | 지하철 상태: $subwayProgress" else ""
+        val transitNote = if (route.transitSummaryKo.isNotBlank()) " | 전체 계획: ${route.transitSummaryKo}" else " | 전체 계획: ${route.macroMilestones.joinToString(" -> ")}"
         val nextStepText = if (nextStep != null) " | 다음 구간: ${nextStep.instructionKo}" else ""
-        return "출발지: ${route.originAddressKo} -> 목적지: ${route.destination.shortAddressKo} (목표 출구: ${route.targetExitTextKo}, 내릴 문 방향: ${route.destinationDoorSideKo}, 남은 직선거리 ${distToDest}m)$transitNote$subwayNote | 현재 세부 구간(${route.currentStepIndex + 1}/${route.turnSteps.size}): ${currentStep.instructionKo}$nextStepText | 나침반 정렬: $compassCoaching"
+        return "$walkStageContext | 현재 구간(${route.currentStepIndex + 1}/${route.turnSteps.size}): ${currentStep.instructionKo}$nextStepText$transitNote$subwayNote"
     }
 }

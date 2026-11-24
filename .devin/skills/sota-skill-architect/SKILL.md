@@ -14,8 +14,13 @@ Every SOTA Micro-Skill synthesizes proven patterns from leading open-source mult
 1. **2-Tier Routing vs. Deep Domain Playbook (inspired by `BasedHardware/omi` & `livekit/agents`)**:
    - **Tier 1 (Lightweight Router Trigger — 1 line)**: Shown in the Global Scene Switch Directory when inactive (~10 tokens/skill) so SOTA can switch to any of the 16+ skills in a single frame without prompt bloat.
    - **Tier 2 (`expertPlaybook` — injected ONLY when active)**: Provides deep O&M / ILS domain expertise (`visualScanChecklist`, `realLifeValueFormula`, `confounderAndSafetyGuards`, `physicalAimingGuide`) so the VLM delivers genuine daily-living value rather than shallow image captioning.
-2. **Zero-Hardcoding & Structured Failure Reason Contract (inspired by `OpenInterpreter/01` & MCP Tool Spec)**:
-   - NEVER hardcode fallback entities (such as a specific station name, screen door `"5-3"`, or bus stop `"22-001"`). All target entities must come from observed slots, the 15-second `TemporalSlotCache`, or the active `MissionContext` / `LocalePack`.
+2. **Zero-Hardcoding & Structural Generalization Mandate (STRICT ANTI-KEYWORD-PATCHING RULE)**:
+   - NEVER hardcode fallback entities (such as a specific station name, screen door `"5-3"`, bus stop `"22-001"`, or sample date).
+   - **NEVER patch field feedback by appending literal item/brand/place nouns (e.g., `"고추장|된장"`, `"투게더"`, `"오렌지주스"`, `"왕십리역"`) into prompts or regexes!**
+   - Always generalize every rule to the **underlying perceptual/structural class**:
+     - Instead of listing food/product names -> match **structural container/label predicates** (container classifiers `통/병/캔/팩/용기`, surface nouns `라벨/뒷면/바닥면`, reading predicates `적혀/표기/기한/성분`) and remove default `WALKING_SAFETY` bias when no outdoor route is active.
+     - Instead of listing specific multi-item pairs -> state the **general multi-object grounding rule** (*read only characters directly legible on each individual label; never infer from adjacent items*).
+     - Instead of hardcoding station lists -> extract dynamic stop coordinates from the live routing API response.
 
 ## 2. The 6-Point Universal Skill Contract (Checklist)
 

@@ -124,6 +124,7 @@ object NativeSotaAiClient {
         val id: String,
         val labelKo: String,
         val triggerDescriptionKo: String,
+        val quickRuleEn: String,
         val extractionRulesKo: String,
         val expertPlaybookEn: String,
         val relatedSkillIds: List<String>,
@@ -134,18 +135,20 @@ object NativeSotaAiClient {
         SkillDefinition(
             id = "WALKING_SAFETY",
             labelKo = "보행 안전 · 점자블록/저조도(UC-04,05,18)",
-            triggerDescriptionKo = "Outdoor sidewalks, tactile paving (점자블록), obstacles (kickboards/bollards UC-05), or dim transitions (UC-18)",
-            extractionRulesKo = "`[WALKING_SAFETY | hazard=킥보드, steps=3, avoidDir=왼쪽]`",
-            expertPlaybookEn = "Scan: 1) Obstacles on tactile paving/curb, 2) Broken tactile blocks or cafe tables, 3) Dim floor flatness & wall shoreline. Value Formula: [Obstacle + steps] -> [Avoidance side & steps] -> [Shoreline Re-alignment: tell user how to return to tactile paving/curb/wall after dodging]. Guard: NEVER classify indoor fridge/bottle/desk/food as WALKING_SAFETY.",
-            relatedSkillIds = listOf("STEP_AND_GLASS_DOOR", "CROSSWALK_SIGNAL", "BUS_STOP"),
+            triggerDescriptionKo = "Outdoor sidewalks, tactile paving (점자블록), station entrance approach, obstacles (UC-05), or dim transitions (UC-18)",
+            quickRuleEn = "Outdoor path: state remaining m to waypoint + safe inner building/fence side (NEVER dodge toward roadway/curb)",
+            extractionRulesKo = "`[WALKING_SAFETY | hazard=..., steps=3, avoidDir=왼쪽|오른쪽]`",
+            expertPlaybookEn = "Scan: 1) Image-LEFT vs Image-RIGHT strictly from pixels (fence/wall vs street trees/curb/roadway), 2) Obstacles on tactile paving & shoreline continuity, 3) Station/stop entrance pole-sign or stairs when within 75m. Value Formula: [Immediate obstacle dodge AWAY from roadway + shoreline re-alignment] OR [Remaining meters to station/turn + safe inner sidewalk side]. Guard: NEVER dodge toward roadway/curb/street-tree side; NEVER say '4~5걸음 더 가볼까요?' on open sidewalks.",
+            relatedSkillIds = listOf("STEP_AND_GLASS_DOOR", "CROSSWALK_SIGNAL", "TRANSFER_CORRIDOR"),
             earconKind = EarconKind.HAZARD_ALERT
         ),
         SkillDefinition(
             id = "STEP_AND_GLASS_DOOR",
             labelKo = "무표시 계단 · 단차 · 투명유리문 감지(UC-14)",
             triggerDescriptionKo = "Low-contrast grey stairs/curbs or frameless glass doors & handles/auto-buttons (UC-14)",
+            quickRuleEn = "Warn downward stair 1st step + handrail side, OR closed glass door Push/Pull/Auto-button location",
             extractionRulesKo = "`[STEP_AND_GLASS_DOOR | type=내리막계단|투명유리문, steps=2, handleSide=오른쪽, action=당기기|밀기|자동문버튼]`",
-            expertPlaybookEn = "Scan: 1) Downward stair edges/curb drops, 2) Closed vs open glass door + Push/Pull sticker, lever/bar handle, or pillar auto-door press button, 3) Handrail side. Value Formula: [Drop-off or door state + steps] -> [Exact Pull/Push/Sliding/Auto-button location or handrail side]. Guard: Never tell user to walk through a closed door.",
+            expertPlaybookEn = "Scan: 1) Unmarked grey downward stair first edge or curb drop, 2) Closed vs open glass door + Push/Pull sticker, bar/lever handle, or pillar auto-door press pad, 3) Left/right handrail. Value Formula: [Drop-off or closed door state + steps] -> [Exact Pull/Push/Sliding/Auto-button height & side, or handrail side]. Guard: Never tell user to walk through a closed door.",
             relatedSkillIds = listOf("WALKING_SAFETY", "INDOOR_SPACE"),
             earconKind = EarconKind.HAZARD_ALERT
         ),
@@ -153,8 +156,9 @@ object NativeSotaAiClient {
             id = "CROSSWALK_SIGNAL",
             labelKo = "횡단보도 · 역광 신호등 인식(UC-06,19)",
             triggerDescriptionKo = "Crosswalk waiting line, pedestrian traffic light, countdown seconds, or backlit signal (UC-06,19)",
+            quickRuleEn = "Verdict Safe-to-Cross vs Wait-Next-Cycle (MUST wait if blinking or <10s left) + right-turn car check",
             extractionRulesKo = "`[CROSSWALK_SIGNAL | signal=GREEN|RED|BLINKING, remainSec=24]`",
-            expertPlaybookEn = "Scan: 1) Far pedestrian light (Red, solid Green, or blinking Green + countdown), 2) Zebra-stripe alignment, 3) Right-turning cars. Value Formula: [Explicit Safe-to-Cross vs Wait-for-Next-Cycle verdict (wait if blinking or <10s)] + [Straight alignment + right-turn car check].",
+            expertPlaybookEn = "Scan: 1) Far pedestrian light (Red, solid Green, or blinking Green + countdown seconds), 2) Crosswalk zebra-stripe alignment, 3) Right-turning cars entering crosswalk. Value Formula: [Clear Cross-Now vs Wait-for-Next-Cycle verdict (ALWAYS wait if blinking or <10s left!)] + [Straight alignment + right-turn car warning].",
             relatedSkillIds = listOf("WALKING_SAFETY", "BUS_STOP"),
             earconKind = EarconKind.SIGNAL_GREEN
         ),
@@ -162,8 +166,9 @@ object NativeSotaAiClient {
             id = "BUS_STOP",
             labelKo = "버스 정류장 · 실시간 노선 매칭(UC-07,19)",
             triggerDescriptionKo = "Bus stop sign (5-digit ARS-ID), BIT LED board (UC-19), or queued city buses (UC-07)",
+            quickRuleEn = "Verify stop direction + 1st vs 2nd queued bus number + steps along curb to open front door",
             extractionRulesKo = "`[BUS_STOP | arsId=..., route=..., queueOrder=1|2, unreadableReason=TOO_FAR|GLARE]`",
-            expertPlaybookEn = "Scan: 1) 5-digit ARS-ID & direction arrow, 2) Queue order of arriving buses (1st front bus vs 2nd trailing bus), 3) Open front door steps. Value Formula: [Direction match] + [1st vs 2nd bus number] + [Steps to front door]. Guard: Never guess blurred numbers.",
+            expertPlaybookEn = "Scan: 1) 5-digit ARS-ID & next-stop direction arrow, 2) Multiple queued buses (1st front bus vs 2nd trailing bus number), 3) Open front boarding door steps & card reader side. Value Formula: [Direction match] + [1st vs 2nd bus route number] + [Steps to open front door]. Guard: Never invent blurred LED numbers.",
             relatedSkillIds = listOf("WALKING_SAFETY", "TAXI_MATCHER", "CROSSWALK_SIGNAL"),
             earconKind = EarconKind.TRANSIT_ARRIVING
         ),
@@ -171,8 +176,9 @@ object NativeSotaAiClient {
             id = "TAXI_MATCHER",
             labelKo = "호출 택시 · 장애인콜택시 번호판 매칭(UC-15)",
             triggerDescriptionKo = "Called taxi or wheelchair call-taxi (장애인 콜택시) license plate, model & door handle (UC-15)",
-            extractionRulesKo = "`[TAXI_MATCHER | taxiPlate=34바5678, taxiColor=흰색, taxiModel=쏘나타]`",
-            expertPlaybookEn = "Scan: 1) License plate digits, 2) Vehicle color & sedan/van type, 3) Rear-right door handle steps & passing bikes on curb. Value Formula: [Match vs Wrong-car alert] + [Color/model] + [Steps to rear-right door handle so user need not grope car body].",
+            quickRuleEn = "Read color, model & plate digits -> confirm match + steps to rear-right door handle & curb bike check",
+            extractionRulesKo = "`[TAXI_MATCHER | taxiPlate=..., taxiColor=..., taxiModel=..., doorSteps=3]`",
+            expertPlaybookEn = "Scan: 1) Full license plate digits, 2) Vehicle color & sedan/van/wheelchair-slope type, 3) Rear-right door handle (lever vs flush) steps & any bikes/motorcycles passing along curb. Value Formula: [Match confirmation vs Wrong-car alert] + [Color/model/plate] + [Steps to rear-right door handle].",
             relatedSkillIds = listOf("WALKING_SAFETY", "BUS_STOP"),
             earconKind = EarconKind.TRANSIT_ARRIVING
         ),
@@ -180,8 +186,9 @@ object NativeSotaAiClient {
             id = "SUBWAY_PLATFORM",
             labelKo = "지하철 승강장 · 방면/호차 확인(UC-08,23)",
             triggerDescriptionKo = "Subway platform before boarding, screen-door car-door code (3-2), or overhead direction sign (UC-08)",
-            extractionRulesKo = "`[SUBWAY_PLATFORM | line=2호선, nextStation=한양대, door=3-2, unreadableReason=TOO_FAR|TILT_UP]`",
-            expertPlaybookEn = "Scan: 1) Overhead next-station direction sign, 2) Screen-door code (e.g. 3-2), 3) Physical door closed vs open gap + alighting crowd. Value Formula: [Correct direction confirmation] + [Current car-door code] + [Wait behind safety line until doors visibly open and alighting passengers clear].",
+            quickRuleEn = "Verify overhead next-station direction matches route + screen-door car-door code + wait until doors open",
+            extractionRulesKo = "`[SUBWAY_PLATFORM | line=..., nextStation=..., door=..., unreadableReason=TOO_FAR|TILT_UP]`",
+            expertPlaybookEn = "Scan: 1) Overhead/screen-door next-station direction sign (warn immediately if opposite platform!), 2) Screen-door code (e.g. 3-2), 3) Physical door closed vs open gap + alighting crowd. Value Formula: [Platform direction match vs Wrong-Platform warning] + [Car-door code] + [Wait behind safety line until doors visibly open and alighting passengers finish].",
             relatedSkillIds = listOf("SUBWAY_ON_BOARD", "TRANSFER_CORRIDOR", "WALKING_SAFETY"),
             earconKind = EarconKind.TRANSIT_ARRIVING
         ),
@@ -189,17 +196,19 @@ object NativeSotaAiClient {
             id = "SUBWAY_ON_BOARD",
             labelKo = "지하철 열차 탑승 중 · 정거장/하차문 안내(UC-08,23)",
             triggerDescriptionKo = "Inside subway train cabin (door window, handrail, passengers, in-cabin station LED)",
-            extractionRulesKo = "`[SUBWAY_ON_BOARD | currentStation=건대입구]`",
-            expertPlaybookEn = "Scan: 1) In-cabin station LED or platform sign through window, 2) Door-side handrail. Value Formula: [Current station & remaining stops] + [Which door side opens at destination (오른쪽/왼쪽)] + [1-stop-before prep alert ONLY at 1 stop remaining]. Guard: Standing by the door window holding the handrail is safe and standard — NEVER tell user to hunt for empty seats or treat the train window as a blocked wall.",
+            quickRuleEn = "Hold door-side handrail (never hunt seats) + announce current station, remaining stops & exit door side",
+            extractionRulesKo = "`[SUBWAY_ON_BOARD | currentStation=...]`",
+            expertPlaybookEn = "Scan: 1) In-cabin station LED or platform sign through window, 2) Door-side vertical pole/handrail. Value Formula: [Current station & remaining stops] + [Which door side opens at destination (오른쪽/왼쪽)] + [1-stop-before prep alert ONLY at 1 stop remaining]. Guard: Standing by the door window holding the handrail is safe and standard — NEVER tell user to hunt for empty seats or treat the train window as a blocked wall.",
             relatedSkillIds = listOf("SUBWAY_PLATFORM", "TRANSFER_CORRIDOR"),
             earconKind = EarconKind.SCANNING_TICK
         ),
         SkillDefinition(
             id = "TRANSFER_CORRIDOR",
-            labelKo = "하차 후 출구/환승 통로 내비(UC-09,23)",
-            triggerDescriptionKo = "Subway exit signs (1번 출구), transfer arrows, fare gates, tactile junctions, or stairs/elevators (UC-09)",
-            extractionRulesKo = "`[TRANSFER_CORRIDOR | targetLine=..., exit=1번출구]`",
-            expertPlaybookEn = "Scan: 1) Target exit number (N번 출구) or transfer line banner, 2) Fare gate card-tap pad & open gate, 3) Cordoned-off stair barriers (우측통행 차단봉) or elevator. Value Formula: [Target exit/line direction] + [Tactile junction turn + fare gate/handrail side, warning if half the stairs are blocked]. Guard: Never use color-only light cues.",
+            labelKo = "지하철 역사/환승/출구 통로 내비(UC-09,23)",
+            triggerDescriptionKo = "Subway concourse direction banners, exit signs (N번 출구), fare gates, tactile junctions, or stairs/elevators (UC-09)",
+            quickRuleEn = "Confirm if direction banner matches destination route + guide fare gate card pad, tactile turn & open stair side",
+            extractionRulesKo = "`[TRANSFER_CORRIDOR | targetLine=..., exit=...]`",
+            expertPlaybookEn = "Scan: 1) Overhead direction station banner or target exit number (N번 출구) — explicitly confirm whether it matches the user's destination direction! 2) Fare gate card-tap pad (right side) & wide accessible gate, 3) Cordoned-off stair barriers (우측통행 차단봉) or elevator. Guard: Never use color-only light cues.",
             relatedSkillIds = listOf("SUBWAY_PLATFORM", "RESTROOM_AND_SEAT", "WALKING_SAFETY"),
             earconKind = EarconKind.TARGET_FOUND
         ),
@@ -207,44 +216,49 @@ object NativeSotaAiClient {
             id = "RESTROOM_AND_SEAT",
             labelKo = "공공화장실 성별/빈칸 · 카페 빈 좌석(UC-12,21)",
             triggerDescriptionKo = "Restroom gender pictograms, vacant stall latch, sink/soap (UC-21), or empty cafe seats & floor bags (UC-12)",
-            extractionRulesKo = "`[RESTROOM_AND_SEAT | gender=남자화장실|여자화장실, vacantStall=2, sink=오른쪽]`",
-            expertPlaybookEn = "Scan: 1) Men's vs Women's entrance pictogram/text when braille is missing, 2) Vacant stall door/latch + sink/soap/dryer side, 3) Cafe closest empty seat & floor bag/cable obstacles. Value Formula: [Exact Men's/Women's door side -> Vacant stall number & sink] OR [Obstacle-free steps to empty seat].",
+            quickRuleEn = "Identify Men's vs Women's door side + vacant stall & sink/soap, OR obstacle-free steps to nearest empty seat",
+            extractionRulesKo = "`[RESTROOM_AND_SEAT | gender=남자화장실|여자화장실, vacantStall=..., sink=...]`",
+            expertPlaybookEn = "Scan: 1) Men's vs Women's entrance pictogram/text (and accessible restroom), 2) Vacant stall door/green latch + sink, soap dispenser & dryer/towel side, 3) In cafes/restaurants: nearest unoccupied seat & floor bags/chair legs along aisle. Value Formula: [Exact Men's/Women's door side -> Vacant stall & sink] OR [Obstacle-free steps to empty seat].",
             relatedSkillIds = listOf("TRANSFER_CORRIDOR", "INDOOR_SPACE"),
             earconKind = EarconKind.TARGET_FOUND
         ),
         SkillDefinition(
             id = "KIOSK_COACH",
-            labelKo = "무인 키오스크 · 공동현관 키패드 · 엘리베이터 코칭(UC-10)",
-            triggerDescriptionKo = "Touchscreen kiosk, apartment entrance touch keypad, or elevator floor buttons with hand (UC-10, LUM-47)",
-            extractionRulesKo = "`[KIOSK_COACH | target=1층버튼|메뉴명, dxCm=3, dyCm=-2, floorLit=false]`",
-            expertPlaybookEn = "Scan: 1) Current screen step or elevator 1F/Lobby button lit state, 2) Fingertip offset to target in cm (dxCm, dyCm), 3) Card slot / NFC pad (usually bottom-right bezel). Value Formula: [1F/screen status] + [cm offset from finger, or anchor finger to bottom-right bezel first if hand not visible] + [Card slot position].",
+            labelKo = "무인 키오스크 · 자판기 구매 · 키패드/엘리베이터 코칭(UC-10)",
+            triggerDescriptionKo = "Touchscreen kiosk, beverage vending machine (자판기), apartment keypad, or elevator buttons (UC-10)",
+            quickRuleEn = "Vending: list row drinks & guide [card reader -> button below drink -> bottom slot]; Kiosk/Keypad: bezel anchor + cm offset",
+            extractionRulesKo = "`[KIOSK_COACH | target=..., dxCm=..., dyCm=..., handVisible=true|false, floorLit=false]`",
+            expertPlaybookEn = "Scan: 1) VENDING MACHINE (자판기): NEVER say '꺼내 드릴까요?' — list visible drinks by shelf row, and when user picks one, guide [Row/position -> Tap card on right-middle card reader -> Press selection button directly below drink -> Retrieve at bottom slot]. 2) KIOSK / KEYPAD / ELEVATOR: Check 1F lit state first; if user's hand is NOT in frame (`handVisible=false`), ask them to touch the bottom-right outer bezel edge first (safe non-touch frame), then guide exact horizontal/vertical cm to the target button + card slot.",
             relatedSkillIds = listOf("INDOOR_SPACE", "APPLIANCE_SAFETY"),
             earconKind = EarconKind.TARGET_FOUND
         ),
         SkillDefinition(
             id = "APPLIANCE_SAFETY",
             labelKo = "평면 인덕션 잔열(H) · 정수기 온수 · 가전 판독(UC-11,20)",
-            triggerDescriptionKo = "Flat induction stove burner/residual heat 'H' (UC-20), touch water dispenser hot/cold (UC-11), or washer/microwave LED",
-            extractionRulesKo = "`[APPLIANCE_SAFETY | appliance=인덕션|정수기|세탁기, zone=오른쪽아래, power=7단계, residualHeat=true|false]`",
-            expertPlaybookEn = "Scan: 1) Burn hazards FIRST: induction active burner, 'H' residual heat LED, or red hot-water touch icon, 2) Active cycle & remaining minutes, 3) Safe cold-water or corner reference anchor. Value Formula: [P0 burn warning if 'H' or hot water] + [Active level/course & remaining time]. Guard: Never tell user to touch flat cooktop glass.",
+            triggerDescriptionKo = "Flat induction stove burner/residual heat 'H' (UC-20), water dispenser (정수기 냉수/온수 UC-11), or washer/microwave LED",
+            quickRuleEn = "P0 warn 'H' residual heat or red hot-water button FIRST + guide safe cold-water lever or read remaining cycle minutes",
+            extractionRulesKo = "`[APPLIANCE_SAFETY | appliance=인덕션|정수기|세탁기|전자레인지, zone=..., power=..., residualHeat=true|false]`",
+            expertPlaybookEn = "Scan: 1) Burn hazards FIRST: induction active ring or 'H' residual heat LED, OR water dispenser red hot-water lock/button (NEVER mention expiration dates on appliances!). 2) Safe cold/ambient button & dispense lever/cup tray position. 3) Washer/microwave/AC current mode & remaining minutes.",
             relatedSkillIds = listOf("KIOSK_COACH", "INDOOR_SPACE"),
             earconKind = EarconKind.HAZARD_ALERT
         ),
         SkillDefinition(
             id = "SMART_READER",
-            labelKo = "냉장고/식품 소비기한 · 카드/약봉지/고지서 요약(UC-01,02,13)",
-            triggerDescriptionKo = "Refrigerator shelves, food tubs/ice cream/drink bottles/cartons, medicine/supplements, access cards/books/mail/bills (UC-01,02,13)",
-            extractionRulesKo = "`[SMART_READER | docType=소비기한|카드|약봉지|고지서, product=..., stampedText=원문그대로또는NONE, expiryDate=YYYY-MM-DD|NONE, dateType=EXPIRY|MANUFACTURED, unreadableReason=WRONG_SIDE|TOO_CLOSE_BLUR|OCCLUDED_BY_HAND]`",
-            expertPlaybookEn = "Scan: 1) Exact brand/product/card/book title, 2) Opened state & remaining amount, 3) Exact ink-jet stamped characters (`stampedText`). CRITICAL ZERO-HALLUCINATION RULE FOR DATES (LUM-150~154): NEVER invent, guess, or fabricate a date (like '2026년 2월 29일' or '3월 30일')! Korean ice cream (`투게더`, 빙과류) usually has NO expiration date (`제조일자` only, stamped on bottom/rim). Unless you can literally read every digit of the stamped date in THIS image and copy it into `stampedText`, you MUST set `stampedText=NONE, expiryDate=NONE, unreadableReason=WRONG_SIDE` and say the date is not visible on this side!",
+            labelKo = "생활 사물/용기 판독 · 소비기한 · 의약품/문서 요약(UC-01,02,13)",
+            triggerDescriptionKo = "Any handheld or shelf container, bottle, tub, pouch, medicine, toiletry, card, book, or printed document (UC-01,02,13)",
+            quickRuleEn = "Identify exact item/med/toiletries + read multi-line dates (`HH:mm` mfg vs later expiry) without guessing unseen dates",
+            extractionRulesKo = "`[SMART_READER | docType=소비기한|의약품|문서|용기, product=..., expiryDate=YYYY-MM-DD|NONE, dateType=EXPIRY|MANUFACTURED, unreadableReason=WRONG_SIDE|TOO_CLOSE_BLUR|OCCLUDED_BY_HAND]`",
+            expertPlaybookEn = "Scan: 1) Exact item identity (oral med vs eyedrop/topical, morning vs evening pouch, shampoo vs conditioner/body-wash pump, opened & remaining level). 2) Multi-Object Independence: read ONLY characters legible on EACH individual container; never infer an adjacent/lower tub's name! 3) Multi-Date Disambiguation: scan all date lines top-to-bottom — a date with `HH:mm` timestamp or earlier year is `제조일자`, while the later date or `까지`/`소비기한` line is `EXPIRY`. 4) Zero Hallucination: if no date digits are visible on this face, set `expiryDate=NONE, unreadableReason=WRONG_SIDE` and coach rotating the container.",
             relatedSkillIds = listOf("GROCERY_SCANNER", "INDOOR_SPACE"),
             earconKind = EarconKind.SCANNING_TICK
         ),
         SkillDefinition(
             id = "GROCERY_SCANNER",
             labelKo = "마트/편의점 유사 용기 맛 · 제로 · 1+1 행사 리더(UC-16)",
-            triggerDescriptionKo = "Mart/convenience store cans, bottles, ramen, shelf price tags, or 1+1 / 2+1 promo badges (UC-16)",
-            extractionRulesKo = "`[GROCERY_SCANNER | product=코카콜라, flavor=레몬향500ml, zeroSugar=true|false, price=2000, promo=1+1|2+1|일반, unreadableReason=...]`",
-            expertPlaybookEn = "Scan: 1) Original vs Zero-Sugar, Decaf vs Regular, Mild vs Spicy, Allergens, 2) Match item name to the exact shelf price tag below it, 3) `1+1`/`2+1` promo badge or left-vs-right hand comparison. Value Formula: [Exact Brand + Variant/Zero-Sugar] + [Verified Price] + [1+1/2+1 Promo].",
+            triggerDescriptionKo = "Mart/convenience store cans, bottles, packaged food, shelf price tags, or 1+1 / 2+1 promo badges (UC-16)",
+            quickRuleEn = "Distinguish Original vs Zero-Sugar/Decaf/Spicy + verify matching shelf price tag + announce 1+1/2+1 promo",
+            extractionRulesKo = "`[GROCERY_SCANNER | product=..., flavor=..., zeroSugar=true|false, price=..., promo=1+1|2+1|일반, unreadableReason=...]`",
+            expertPlaybookEn = "Scan: 1) Look-alike variant details: Original vs Zero-Sugar, Decaf vs Regular, Mild vs Spicy, key allergens. 2) Verify that the shelf price tag name directly below matches the held product before reading price. 3) Announce `1+1`/`2+1` promo (so user can grab the free extra item!) or compare left-hand vs right-hand items.",
             relatedSkillIds = listOf("SMART_READER", "KIOSK_COACH"),
             earconKind = EarconKind.TARGET_FOUND
         ),
@@ -252,26 +266,29 @@ object NativeSotaAiClient {
             id = "DINING_ASSISTANT",
             labelKo = "식사 반찬 배치 · 수저/물컵 · 생선 가시/남은 양(UC-17)",
             triggerDescriptionKo = "Dining table, meal tray (식판), rice/soup/side dishes, water cup/utensils, or remaining food check (UC-17)",
-            extractionRulesKo = "`[DINING_ASSISTANT | frontLeft=흰쌀밥, frontRight=된장국, topCenter=고등어구이, boneHazard=true|false]`",
-            expertPlaybookEn = "Scan: 1) Body-relative food layout (앞쪽 좌/우 밥·국, 위쪽 칸 반찬) especially low-contrast white foods (두부, 백김치, 흰살생선), 2) Fish bones/thorns or hot stone pot (뚝배기), 3) Water cup/spoon drawer/napkin position OR remaining pieces mid-meal. Value Formula: [Dish layout] + [Bone/hot-pot warning] + [Utensil/cup or remaining pieces].",
+            quickRuleEn = "Body-relative dish layout (white-on-white foods) + bone/hot-pot warning + water cup/utensil drawer or remaining pieces",
+            extractionRulesKo = "`[DINING_ASSISTANT | frontLeft=..., frontRight=..., topCenter=..., boneHazard=true|false]`",
+            expertPlaybookEn = "Scan: 1) Body-relative food layout (앞쪽 좌/우 밥·국, 위쪽 칸 반찬), calling out low-contrast white foods on white plates. 2) Fish bones/thorns (`가시/뼈`) or sizzling hot stone pot (`뚝배기`) burn warning. 3) Water cup/pitcher, utensil box/side drawer & napkins at meal start, OR exact remaining pieces mid-meal.",
             relatedSkillIds = listOf("INDOOR_SPACE", "SMART_READER"),
             earconKind = EarconKind.TARGET_FOUND
         ),
         SkillDefinition(
             id = "INDOOR_SPACE",
             labelKo = "실내 동선 · 물건 위치 기억/찾기 · 복장 점검(UC-03)",
-            triggerDescriptionKo = "Personal items (에어팟, 안경, 열쇠, 지갑), outfit stain/inside-out check (UC-03), or indoor furniture/doors",
-            extractionRulesKo = "`[INDOOR_SPACE | rememberedItem=에어팟, itemLocation=소파 오른쪽 쿠션 옆, recallItem=에어팟]`",
-            expertPlaybookEn = "Scan: 1) Personal items anchored to touchable furniture landmarks, 2) Outfit collar/front stains, color match, or inside-out seams, 3) Floor cords/rug corners & exit door handle. Value Formula: [Item landmark + reach distance] OR [Stain/outfit verdict] OR [Safe turn away from desk/window toward door].",
-            relatedSkillIds = listOf("SMART_READER", "APPLIANCE_SAFETY", "WALKING_SAFETY"),
+            triggerDescriptionKo = "Personal items, outfit stain/inside-out check (UC-03), or indoor room furniture/doors",
+            quickRuleEn = "Save/recall personal item landmark + reach distance, check outfit stains/seams, or guide around indoor cords/furniture",
+            extractionRulesKo = "`[INDOOR_SPACE | rememberedItem=..., itemLocation=..., recallItem=...]`",
+            expertPlaybookEn = "Scan: 1) Personal items anchored to touchable permanent furniture landmarks + reach distance, 2) Outfit collar/front stains, color match, or inside-out seams/tags when asked, 3) Floor cords/upturned rug corners. Guard: Never invent an item location if not visible and not in saved memory.",
+            relatedSkillIds = listOf("SMART_READER", "APPLIANCE_SAFETY", "KIOSK_COACH"),
             earconKind = EarconKind.TARGET_FOUND
         ),
         SkillDefinition(
             id = "SOCIAL_MEETING",
             labelKo = "상대방 명함/악수 제스처 · 회의 슬라이드 요약(UC-22)",
             triggerDescriptionKo = "Partner extending hand for handshake/business card/cup, or meeting projector/monitor slide (UC-22)",
-            extractionRulesKo = "`[SOCIAL_MEETING | cueType=HANDING_OBJECT|PRESENTATION_SLIDE, title=미팅상대방|슬라이드제목, detail=오른손으로 명함을 건네고]`",
-            expertPlaybookEn = "Scan: 1) Partner extending hand/card/cup & height, 2) Slide title + top 1-2 numbers/conclusions. Value Formula: [1-sentence whisper cue: object & chest/waist reach height] OR [Slide headline + core takeaway without reading raw bullet walls].",
+            quickRuleEn = "1-sentence whisper cue for extended hand/card/cup height, OR slide headline + 1 core takeaway",
+            extractionRulesKo = "`[SOCIAL_MEETING | cueType=HANDING_OBJECT|PRESENTATION_SLIDE, title=..., detail=...]`",
+            expertPlaybookEn = "Scan: 1) Partner extending hand for handshake, business card, or cup + exact reach height (가슴/허리 높이), 2) Presentation slide headline + top 1-2 key metrics/conclusions (never read dense bullet walls aloud so user can hear the speaker).",
             relatedSkillIds = listOf("INDOOR_SPACE", "SMART_READER"),
             earconKind = EarconKind.TARGET_FOUND
         ),
@@ -279,6 +296,7 @@ object NativeSotaAiClient {
             id = "NAV_CONTROL",
             labelKo = "내비게이션 경로 · 이동수단 제어 도구",
             triggerDescriptionKo = "User requests destination search/change, candidate selection, or transport mode switch",
+            quickRuleEn = "Extract pure place noun or transport mode switch",
             extractionRulesKo = "`[NAV_CONTROL | navAction=SWITCH_SUBWAY|SWITCH_BUS|SWITCH_WALK|SEARCH_PLACE|SELECT_CANDIDATE|CONFIRM_START, place=..., index=1]`",
             expertPlaybookEn = "Extract pure place noun or transport mode switch slot and reply warmly in 1 Korean sentence.",
             relatedSkillIds = listOf("WALKING_SAFETY", "SUBWAY_PLATFORM", "BUS_STOP"),
@@ -287,7 +305,7 @@ object NativeSotaAiClient {
     ).associateBy { it.id }
 
     @Volatile
-    var stickyModeTag: String = "WALKING_SAFETY"
+    var stickyModeTag: String = "INDOOR_SPACE"
         private set
 
     @Volatile
@@ -296,11 +314,8 @@ object NativeSotaAiClient {
     @Volatile
     var expectedTaxiPlate: String = ""
 
-    private val visualMemoryMap = mutableMapOf(
-        "에어팟" to "거실 소파 오른쪽 쿠션 옆",
-        "안경" to "침대 머리맡 협탁 위",
-        "열쇠" to "현관 신발장 위 트레이"
-    )
+    // Zero fake pre-seeded items on real device — populated ONLY from actual camera observations!
+    private val visualMemoryMap = mutableMapOf<String, String>()
 
     private val temporalSlotCache = mutableMapOf<String, Pair<String, Long>>()
     private const val SLOT_TTL_MS = 15_000L
@@ -561,10 +576,12 @@ object NativeSotaAiClient {
                 sb.append("• [$id] ${sk.extractionRulesKo}\n  Playbook: ${sk.expertPlaybookEn}\n")
             }
         }
-        sb.append("\n[Tier-1 Scene Switch Directory — Switch [MODE_ID] immediately when visible]: ")
-        val switchTags = SKILLS.keys.filter { it !in activeIds && it != "SUBWAY_ON_BOARD" && it != "NAV_CONTROL" }
-            .joinToString(", ") { id -> "[$id](${SKILLS.getValue(id).labelKo.substringBefore("(")})" }
-        sb.append("$switchTags\n")
+        sb.append("\n[Tier-1 Scene Switch Directory — Switch [MODE_ID] immediately on Frame 1 when visible]:\n")
+        for ((id, sk) in SKILLS) {
+            if (id !in activeIds && id != "SUBWAY_ON_BOARD" && id != "NAV_CONTROL") {
+                sb.append("- [$id]: ${sk.quickRuleEn}\n")
+            }
+        }
         if (!previousSpeech.isNullOrBlank() && userQuery.isBlank()) {
             sb.append("\n(Previous SOTA speech: \"$previousSpeech\" — If the camera scene is unchanged, do NOT invent a state jump; keep consistent station/waiting guidance.)\n")
         }
@@ -595,6 +612,7 @@ object NativeSotaAiClient {
         val match = headerRegex.find(cleaned)
         val rawExtractedSlots = mutableMapOf<String, String>()
 
+        val defaultFallbackMode = if (activeMissionGoal.isNotEmpty()) "WALKING_SAFETY" else "INDOOR_SPACE"
         val rawModeId = if (match != null) {
             val rawSlots = match.groupValues[2].trim()
             if (rawSlots.isNotEmpty()) {
@@ -607,23 +625,30 @@ object NativeSotaAiClient {
             }
             match.groupValues[1]
         } else {
-            "WALKING_SAFETY"
+            defaultFallbackMode
         }
 
         val slots = mergeAndCacheTemporalSlots(rawExtractedSlots)
         val bodyText = match?.groupValues?.get(3)?.trim()?.takeIf { it.isNotEmpty() } ?: cleaned
 
-        // Layer 2 Content-Aware Mode Corrector (Fixes LUM-132~134, LUM-143/147, & LUM-155 ice cream / food containers / indoor items):
-        val isHandheldReadingItem = Regex("손에\\s*(?:쥐고|들고)|출입카드|카드|출입증|신분증|유의사항|생활지원센터|관리사무소|표지에|책을\\s*들고|샴푸|린스|컨디셔너|바디워시|세안제|로션|냉장고|아이스크림|투게더|바닐라|요거트|과자|빵|컵라면|라면|음료|주스|오렌지|우유|두부|반찬통|식품|제품이고|통이\\s*보이|통에\\s*담겨|유통기한|소비기한|제조일자|약봉지|안약|점안액|영양제|엽산|유산균|고지서|택배|송장", RegexOption.IGNORE_CASE).containsMatchIn(bodyText)
-        val modeId = if (isHandheldReadingItem && rawModeId in setOf("WALKING_SAFETY", "RESTROOM_AND_SEAT")) {
-            "SMART_READER"
-        } else if (rawModeId == "WALKING_SAFETY") {
-            when {
+        // Layer 2 Structural Scene Mode Corrector (100% Zero Item-Noun Hardcoding — uses structural/functional predicates only!):
+        val isApplianceStructure = Regex("정수기|물받이|출수|온수|냉수|인덕션|화구|잔열|세탁기|전자레인지|작동\\s*중|가열").containsMatchIn(bodyText)
+        val isInteractiveTerminalStructure = Regex("자판기|키오스크|카드\\s*단말기|카드\\s*투입구|선택\\s*버튼|터치패드|키패드|엘리베이터.*버튼|손가락에서").containsMatchIn(bodyText)
+        val isOutdoorPedestrianStructure = Regex("보도|인도|점자블록|연석|차도|가로수|울타리|갈림길|볼라드|킥보드|횡단보도|걸음\\s*(?:앞|정도)").containsMatchIn(bodyText)
+        val isContainerOrLabelStructure = !isOutdoorPedestrianStructure && !isApplianceStructure && !isInteractiveTerminalStructure && Regex(
+            "손에\\s*(?:쥐고|들고|든)|냉장고|선반|용기|포장|라벨|책\\s*표지|표기|인쇄|적혀|쓰여|유통기한|소비기한|제조일|납부|송장|복용|점안액|출입카드|출입증|신분증|(?:윗|옆|뒷|바닥|뚜껑)\\s*면|(?:통|병|캔|팩|봉지|튜브|상자|봉투|카드)(?:이|가|에|을|를|은|는|의|\\s)"
+        ).containsMatchIn(bodyText)
+
+        val modeId = when {
+            isApplianceStructure && rawModeId in setOf("WALKING_SAFETY", "SMART_READER", "INDOOR_SPACE") -> "APPLIANCE_SAFETY"
+            isInteractiveTerminalStructure && rawModeId in setOf("WALKING_SAFETY", "SMART_READER", "INDOOR_SPACE") -> "KIOSK_COACH"
+            isContainerOrLabelStructure && rawModeId in setOf("WALKING_SAFETY", "RESTROOM_AND_SEAT", "INDOOR_SPACE") -> "SMART_READER"
+            rawModeId == "WALKING_SAFETY" -> when {
                 Regex("1\\+1|2\\+1|제로\\s*슈거|제로슈거|가격표|행사\\s*상품").containsMatchIn(bodyText) || slots.containsKey("promo") -> "GROCERY_SCANNER"
                 slots.containsKey("expiryDate") || slots.containsKey("product") -> "SMART_READER"
-                Regex("식판|접시|반찬|흰쌀밥|된장국|생선\\s*가시").containsMatchIn(bodyText) || slots.containsKey("frontLeft") -> "DINING_ASSISTANT"
-                Regex("인덕션|화구|잔열|세탁기|전자레인지|정수기|온수").containsMatchIn(bodyText) || slots.containsKey("residualHeat") -> "APPLIANCE_SAFETY"
-                Regex("키오스크|엘리베이터.*버튼|손가락에서").containsMatchIn(bodyText) || slots.containsKey("dxCm") -> "KIOSK_COACH"
+                Regex("식판|접시|반찬|국그릇|밥그릇|가시|뼈가").containsMatchIn(bodyText) || slots.containsKey("frontLeft") -> "DINING_ASSISTANT"
+                slots.containsKey("residualHeat") -> "APPLIANCE_SAFETY"
+                slots.containsKey("dxCm") -> "KIOSK_COACH"
                 Regex("화장실|세면대|빈\\s*칸|빈\\s*좌석|빈자리").containsMatchIn(bodyText) || slots.containsKey("gender") -> "RESTROOM_AND_SEAT"
                 Regex("명함|악수|슬라이드|발표").containsMatchIn(bodyText) || slots.containsKey("cueType") -> "SOCIAL_MEETING"
                 Regex("택시|장콜|번호판|승차문|뒷좌석").containsMatchIn(bodyText) || slots.containsKey("taxiPlate") -> "TAXI_MATCHER"
@@ -632,26 +657,52 @@ object NativeSotaAiClient {
                 Regex("버스|정류장|정류소").containsMatchIn(bodyText) -> "BUS_STOP"
                 Regex("승강장|스크린도어|빠른\\s*환승").containsMatchIn(bodyText) -> "SUBWAY_PLATFORM"
                 Regex("열차\\s*안|객차\\s*안|정거장\\s*남았").containsMatchIn(bodyText) -> "SUBWAY_ON_BOARD"
-                Regex("환승\\s*통로|출구\\s*방향|개찰구").containsMatchIn(bodyText) -> "TRANSFER_CORRIDOR"
-                Regex("에어팟|안경|열쇠|지갑|리모컨|얼룩|셔츠|책상|모니터|서랍장|소파|방문").containsMatchIn(bodyText) || slots.containsKey("rememberedItem") -> "INDOOR_SPACE"
+                Regex("환승\\s*통로|출구\\s*방향|개찰구|방면.*표지판").containsMatchIn(bodyText) -> "TRANSFER_CORRIDOR"
+                activeMissionGoal.isEmpty() && !isOutdoorPedestrianStructure -> "INDOOR_SPACE"
                 else -> "WALKING_SAFETY"
             }
-        } else {
-            rawModeId
+            else -> rawModeId
         }
 
         var draftSpeech = WayfindingNavigator.guardSubwayRideSpeech(
-            cleanMovementRelativeDirection(bodyText)
+            cleanMovementRelativeDirection(bodyText),
+            modeId
         )
+        // SOT-164 Guard: Never ask for expiration dates on a water dispenser!
+        if (modeId == "APPLIANCE_SAFETY" && Regex("정수기|물받이").containsMatchIn(draftSpeech) && Regex("소비기한|유통기한|날짜").containsMatchIn(draftSpeech)) {
+            draftSpeech = "정수기 앞이시네요. 화상 위험이 있는 온수 버튼을 피하고 냉수나 정수 버튼과 출수 레버 위치를 보시려면 상단 버튼부를 조금 더 비춰 주실래요?"
+        }
+        // SOT-159~161 Guard: Never offer to 'pull out' a drink locked inside a vending machine — guide purchase steps!
+        if (modeId == "KIOSK_COACH" && Regex("꺼내\\s*드릴까요").containsMatchIn(draftSpeech)) {
+            draftSpeech = draftSpeech.replace(
+                Regex("(?:원하시는\\s*(?:위치의\\s*)?(?:물을|음료를)\\s*)?꺼내\\s*드릴까요\\??"),
+                "구매하시려면 자판기 오른쪽 카드 단말기에 카드를 먼저 태그하신 뒤 해당 음료 바로 아래 선택 버튼을 누르고 맨 아래 출구에서 꺼내시면 돼요."
+            )
+        }
         val skill = SKILLS[modeId] ?: SKILLS.getValue("INDOOR_SPACE")
         stickyModeTag = skill.id
         advanceMissionStage(skill.id)
 
-        // Layer 2 Guard & Enrichment for SUBWAY_PLATFORM (Zero-Hardcoding + Active View-Finding)
+        // Layer 2 Guard & Enrichment for SUBWAY_PLATFORM (Wrong-Platform P0 Alert + Fast-Transfer + Active View-Finding)
         if (skill.id == "SUBWAY_PLATFORM") {
             val door = slots["door"] ?: Regex("(\\d{1,2}-\\d)").find(draftSpeech)?.groupValues?.get(1)
             val nextStn = slots["nextStation"]?.takeIf { isValidSlot(it) }
             val line = slots["line"]?.takeIf { isValidSlot(it) }
+            val routeStns = WayfindingNavigator.activeRoute?.subwayRouteStations.orEmpty()
+
+            if (nextStn != null && routeStns.size >= 2) {
+                val obsCore = WayfindingNavigator.normalizeStationCore(nextStn)
+                val validForwardCores = routeStns.drop(1).map { WayfindingNavigator.normalizeStationCore(it) }
+                if (obsCore.isNotEmpty() && obsCore !in validForwardCores) {
+                    val intendedNext = routeStns[1]
+                    val wrongPlatSkill = skill.copy(earconKind = EarconKind.HAZARD_ALERT)
+                    return Triple(
+                        wrongPlatSkill,
+                        "잠깐만요! 지금 계신 곳은 $nextStn 방면 반대쪽 승강장이에요. 열차를 타지 마시고 계단이나 엘리베이터를 이용해 반대편 $intendedNext 방면 승강장으로 건너가세요.",
+                        slots
+                    )
+                }
+            }
 
             if (door != null && nextStn != null) {
                 val arrivalMin = fetchSeoulSubwayLive(nextStn, nextStn)
@@ -678,6 +729,38 @@ object NativeSotaAiClient {
                 draftSpeech = coachPhysicalViewFindingKo(slots["unreadableReason"], "SIGN")
             }
             return Triple(skill, draftSpeech, slots)
+        }
+
+        // Layer 2 P0 Crosswalk Blinking / Short-Countdown Safety Override (UC-06, 19)
+        if (skill.id == "CROSSWALK_SIGNAL") {
+            val sig = (slots["signal"] ?: "").uppercase()
+            val sec = slots["remainSec"]?.toIntOrNull()
+                ?: Regex("(\\d+)\\s*초").find(draftSpeech)?.groupValues?.get(1)?.toIntOrNull()
+            if (sig == "BLINKING" || (sig == "GREEN" && sec != null && sec in 1..9)) {
+                val waitSkill = skill.copy(earconKind = EarconKind.HAZARD_ALERT)
+                val secNote = if (sec != null) "남은 시간이 ${sec}초로 짧아 " else "초록불이 깜빡이고 있어 "
+                return Triple(
+                    waitSkill,
+                    "잠시 기다리세요! ${secNote}지금 건너기 시작하면 중간에 신호가 바뀌어 위험해요. 다음 초록불에 안전하게 건너세요.",
+                    slots
+                )
+            }
+        }
+
+        // Layer 2 Step & Glass Door Safety Enrichment (UC-14)
+        if (skill.id == "STEP_AND_GLASS_DOOR") {
+            val t = slots["type"]?.takeIf { isValidSlot(it) }
+            val stps = slots["steps"]?.takeIf { isValidSlot(it) }
+            val side = slots["handleSide"]?.takeIf { isValidSlot(it) }
+            val act = slots["action"]?.takeIf { isValidSlot(it) }
+            if (t != null && stps != null && side != null && act != null && t.contains("유리문")) {
+                return Triple(skill, "주의하세요! 정면 ${stps}걸음 앞에 투명 유리문이 닫혀 있어요. $side 에 있는 $act 손잡이나 버튼을 이용해 여세요.", slots)
+            }
+        }
+
+        // Layer 2 Grocery Scanner View-Finding Guard (UC-16)
+        if (skill.id == "GROCERY_SCANNER" && isValidSlot(rawExtractedSlots["unreadableReason"])) {
+            return Triple(skill, coachPhysicalViewFindingKo(rawExtractedSlots["unreadableReason"], "HANDHELD_ITEM"), slots)
         }
 
         // Layer 2 Live Seoul Bus & Called Taxi Enrichment for BUS_STOP (Zero-Hardcoding)
@@ -707,64 +790,91 @@ object NativeSotaAiClient {
             }
         }
 
-        // Layer 2 Real-Date Food Expiry D-Day Calculator & Anti-Hallucination Guard for SMART_READER (UC-02, LUM-150~154)
+        // Layer 2 Real-Date Food Expiry D-Day Calculator & Anti-Hallucination Guard for SMART_READER (UC-02, SOT-156, 163)
         if (skill.id == "SMART_READER") {
-            val prod = rawExtractedSlots["product"]?.takeIf { isValidSlot(it) } ?: slots["product"]?.takeIf { isValidSlot(it) } ?: "제품"
-            val stampedRaw = rawExtractedSlots["stampedText"]?.takeIf { isValidSlot(it) }
+            val prod = rawExtractedSlots["product"]?.takeIf { isValidSlot(it) } ?: slots["product"]?.takeIf { isValidSlot(it) } ?: ""
             val expRaw = rawExtractedSlots["expiryDate"]?.takeIf { isValidSlot(it) }
             val dateType = (rawExtractedSlots["dateType"] ?: "EXPIRY").uppercase()
+            val prodPrefix = if (prod.isNotBlank() && prod != "제품") "$prod 제품이지만 " else ""
 
-            // Deterministic Hallucination Blocker #1: Reject impossible calendar dates (e.g. `2026-02-29` or `2026년 2월 29일` in LUM-153/154!)
+            // ONLY block impossible Gregorian dates (like non-leap `2026-02-29` in LUM-153/154) — NEVER erase a valid date read in draftSpeech (SOT-156, 163)!
             val bodyIsoCheck = Regex("(20\\d{2})\\s*년\\s*(\\d{1,2})\\s*월\\s*(\\d{1,2})\\s*일").find(draftSpeech)?.let { m ->
                 "%04d-%02d-%02d".format(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt())
             }
             if ((expRaw != null && Regex("^\\d{4}[-.]\\d{2}[-.]\\d{2}$").matches(expRaw) && !isRealCalendarDateIso(expRaw)) ||
-                (bodyIsoCheck != null && !isRealCalendarDateIso(bodyIsoCheck)) ||
-                (bodyIsoCheck != null && expRaw == null && stampedRaw == null)
+                (bodyIsoCheck != null && !isRealCalendarDateIso(bodyIsoCheck))
             ) {
                 val isIceCream = Regex("투게더|아이스크림|빙과").containsMatchIn("$prod $draftSpeech")
                 val msg = if (isIceCream) {
-                    "$prod 제품이에요. 지금 비추신 면에는 날짜가 보이지 않아요. 아이스크림은 주로 뚜껑 테두리나 바닥 면에 제조일자가 찍혀 있으니 용기 아래쪽을 비춰 보실래요?"
+                    "${prod.ifBlank { "아이스크림" }} 제품이에요. 지금 비추신 면에는 날짜가 보이지 않아요. 아이스크림은 주로 뚜껑 테두리나 바닥 면에 제조일자가 찍혀 있으니 용기 아래쪽을 비춰 보실래요?"
                 } else {
-                    "$prod 제품이지만 지금 각도에서는 소비기한 숫자가 선명하게 보이지 않아요. 용기 위쪽이나 옆면을 천천히 돌려 비춰 보실래요?"
+                    "${prodPrefix}지금 각도에서는 소비기한 숫자가 선명하게 보이지 않아요. 용기 위쪽이나 옆면을 천천히 돌려 비춰 보실래요?"
                 }
                 return Triple(skill, msg, slots)
             }
 
-            if (isValidSlot(rawExtractedSlots["unreadableReason"])) {
+            if (isValidSlot(rawExtractedSlots["unreadableReason"]) && bodyIsoCheck == null) {
                 return Triple(skill, coachPhysicalViewFindingKo(rawExtractedSlots["unreadableReason"], "HANDHELD_ITEM"), slots)
             }
-            if (dateType == "MANUFACTURED" && expRaw != null) {
-                return Triple(skill, "$prod 제조일자가 $expRaw 로 적혀 있어요. 소비기한은 용기 다른 면에 적혀 있으니 천천히 반 바퀴 돌려 비춰 보실래요?", slots)
+            if (dateType == "MANUFACTURED" && expRaw != null && bodyIsoCheck == null) {
+                return Triple(skill, "${prod.ifBlank { "상품" }} 제조일자가 $expRaw 로 적혀 있어요. 소비기한은 그 아래 줄이나 용기 다른 면에 적혀 있으니 확인해 보실래요?", slots)
             }
-            if (expRaw != null) {
+            val resolvedIso = expRaw ?: if (!draftSpeech.contains("제조")) bodyIsoCheck else null
+            if (resolvedIso != null) {
                 try {
-                    val expDate = LocalDate.parse(expRaw.replace(".", "-"))
+                    val expDate = LocalDate.parse(resolvedIso.replace(".", "-"))
                     val diffDays = ChronoUnit.DAYS.between(LocalDate.now(), expDate)
-                    val dDaySpeech = when {
-                        diffDays < 0 -> "주의하세요! $prod 소비기한이 ${expDate.monthValue}월 ${expDate.dayOfMonth}일까지로 이미 ${kotlin.math.abs(diffDays)}일 지났어요. 드시지 마세요."
-                        diffDays == 0L -> "$prod 소비기한이 오늘(${expDate.monthValue}월 ${expDate.dayOfMonth}일)까지예요."
-                        else -> "$prod 소비기한은 ${expDate.monthValue}월 ${expDate.dayOfMonth}일까지로 오늘부터 ${diffDays}일 남았어요."
+                    if (diffDays < 0) {
+                        val warnSkill = skill.copy(earconKind = EarconKind.HAZARD_ALERT)
+                        val label = prod.ifBlank { "이 제품" }
+                        return Triple(
+                            warnSkill,
+                            "주의하세요! $label 소비기한이 ${expDate.monthValue}월 ${expDate.dayOfMonth}일까지로 이미 ${kotlin.math.abs(diffDays)}일 지났어요. 드시지 마세요.",
+                            slots
+                        )
+                    } else if (expRaw != null) {
+                        val label = if (prod.isNotBlank()) "$prod " else ""
+                        val dDaySpeech = if (diffDays == 0L) {
+                            "${label}소비기한이 오늘(${expDate.monthValue}월 ${expDate.dayOfMonth}일)까지예요."
+                        } else {
+                            "${label}소비기한은 ${expDate.monthValue}월 ${expDate.dayOfMonth}일까지로 오늘부터 ${diffDays}일 남았어요."
+                        }
+                        return Triple(skill, dDaySpeech, slots)
                     }
-                    return Triple(skill, dDaySpeech, slots)
                 } catch (_: Exception) {}
             }
         }
 
-        // Layer 2 Visual Memory Indexing for INDOOR_SPACE (UC-03)
+        // Layer 2 Visual Memory Indexing & Deterministic Recall for INDOOR_SPACE (UC-03)
         if (skill.id == "INDOOR_SPACE") {
-            val remItem = slots["rememberedItem"]?.takeIf { isValidSlot(it) }
-            val remLoc = slots["itemLocation"]?.takeIf { isValidSlot(it) }
+            val remItem = rawExtractedSlots["rememberedItem"]?.takeIf { isValidSlot(it) }
+            val remLoc = rawExtractedSlots["itemLocation"]?.takeIf { isValidSlot(it) }
             if (remItem != null && remLoc != null) {
                 rememberObjectLocation(remItem, remLoc)
             }
+            val recallKey = rawExtractedSlots["recallItem"]?.takeIf { isValidSlot(it) }
+            if (recallKey != null) {
+                val matchedEntry = synchronized(this) {
+                    visualMemoryMap.entries.find { it.key.contains(recallKey) || recallKey.contains(it.key) }
+                }
+                if (matchedEntry != null) {
+                    return Triple(skill, "기억해 둔 위치가 있어요! ${matchedEntry.key}은 ${matchedEntry.value}에서 보였어요.", slots)
+                }
+            }
         }
 
-        // Layer 2 P0 Residual Heat & Fingertip cm Math for KIOSK_COACH / APPLIANCE_SAFETY (UC-10, UC-20)
+        // Layer 2 Fingertip cm Math & Safe Bezel Anchor for KIOSK_COACH (UC-10)
         if (skill.id == "KIOSK_COACH") {
-            val target = slots["target"]?.takeIf { isValidSlot(it) }
-            val dx = slots["dxCm"]?.toDoubleOrNull()
-            val dy = slots["dyCm"]?.toDoubleOrNull()
+            val target = rawExtractedSlots["target"]?.takeIf { isValidSlot(it) } ?: slots["target"]?.takeIf { isValidSlot(it) }
+            if (rawExtractedSlots["handVisible"] == "false" && target != null && !draftSpeech.contains("자판기")) {
+                return Triple(
+                    skill,
+                    "$target 버튼을 누르시려면 먼저 터치되지 않는 화면 오른쪽 아래 바깥 테두리 모서리에 검지 손가락을 살짝 대어 보실래요? 거기서부터 정확한 이동 거리를 알려드릴게요.",
+                    slots
+                )
+            }
+            val dx = rawExtractedSlots["dxCm"]?.toDoubleOrNull()
+            val dy = rawExtractedSlots["dyCm"]?.toDoubleOrNull()
             if (target != null && dx != null && dy != null) {
                 val hMove = when {
                     dx > 0.4 -> "오른쪽으로 ${kotlin.math.round(dx).toInt()}cm"
@@ -785,9 +895,14 @@ object NativeSotaAiClient {
                 return Triple(skill, cmSpeech, slots)
             }
         }
-        if ((skill.id == "APPLIANCE_SAFETY" || skill.id == "KIOSK_COACH") && slots["residualHeat"] == "true") {
+        if ((skill.id == "APPLIANCE_SAFETY" || skill.id == "KIOSK_COACH") && rawExtractedSlots["residualHeat"] == "true") {
             val hotSkill = skill.copy(earconKind = EarconKind.HAZARD_ALERT)
-            return Triple(hotSkill, draftSpeech, slots)
+            val burnSpeech = if (Regex("잔열|뜨거|화상|손을\\s*대지").containsMatchIn(draftSpeech)) {
+                draftSpeech
+            } else {
+                "화상 주의! $draftSpeech 화구에 잔열이 남아 뜨거우니 절대 손을 대지 마세요."
+            }
+            return Triple(hotSkill, burnSpeech, slots)
         }
         if (skill.id == "TAXI_MATCHER") {
             val obsPlate = slots["taxiPlate"]?.takeIf { isValidSlot(it) }
@@ -863,8 +978,18 @@ object NativeSotaAiClient {
             .toString()
 
         var lastError = ""
-        // Automatic retry up to 2 attempts to survive subway LTE/5G handoffs (Fixes LUM-18/21/22/24/25/28)
-        for (attempt in 1..2) {
+        // Multi-Model High-Availability Cascade (Mined from 1,000-item batch QA: survives temporary 503 demand spikes on primary model!)
+        val candidateModels = listOf(CHEAPEST_FAST_MODEL, "gemini-3.1-flash-lite", "gemini-3.8-flash")
+        for (modelName in candidateModels) {
+            val reqBody = if (modelName == "gemini-3.8-flash") {
+                JSONObject()
+                    .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
+                    .put("generationConfig", JSONObject().put("temperature", 0.15).put("maxOutputTokens", if (wantFullRead) 650 else 220))
+                    .toString()
+            } else {
+                bodyString
+            }
+            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
             try {
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
@@ -875,7 +1000,7 @@ object NativeSotaAiClient {
                 }
 
                 OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
-                    writer.write(bodyString)
+                    writer.write(reqBody)
                 }
 
                 val status = conn.responseCode
@@ -929,8 +1054,8 @@ object NativeSotaAiClient {
                 }
             } catch (e: Exception) {
                 lastError = e.javaClass.simpleName
-                if (attempt == 1) {
-                    try { Thread.sleep(600) } catch (_: Exception) {}
+                if (modelName == CHEAPEST_FAST_MODEL) {
+                    try { Thread.sleep(400) } catch (_: Exception) {}
                 }
             }
         }
